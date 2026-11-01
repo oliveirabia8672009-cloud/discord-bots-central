@@ -9,7 +9,9 @@
     "build": "tsc -p tsconfig.build.json",
     "cloud:backup": "node dist/config/nuvem-cli.js backup",
     "cloud:check": "node dist/config/nuvem-cli.js check",
-    "cloud:restore": "node dist/config/nuvem-cli.js restore"
+    "cloud:restore": "node dist/config/nuvem-cli.js restore",
+    "build:discloud": "tsc -p tsconfig.discloud.json",
+    "start:discloud": "node start-discloud.mjs"
   },
   "keywords": [],
   "author": "",

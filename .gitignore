@@ -9,3 +9,5 @@ dist/
 *.bak*
 *.pem
 *.key
+build/
+*.zip
