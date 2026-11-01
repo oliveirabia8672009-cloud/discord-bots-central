@@ -1,3 +1,4 @@
+import './fontes.js';
 import {createCanvas,loadImage} from '@napi-rs/canvas';
 import {nivelXP,minimoXP} from './membros-store.js';
 export async function avatarMembro(url:string){
@@ -8,8 +9,8 @@ export async function avatarMembro(url:string){
 export async function imagemPerfil(d:{nome:string;servidor:string;xp:number;cor:number;avatar?:string;convites:number;posicao:number;subiu?:boolean}){
  const c=createCanvas(1000,500),ctx=c.getContext('2d'),nivel=nivelXP(d.xp),de=minimoXP(nivel),ate=minimoXP(nivel+1),frac=(d.xp-de)/(ate-de);
  ctx.fillStyle='#10151f';ctx.fillRect(0,0,1000,500);const acento='#'+d.cor.toString(16).padStart(6,'0');ctx.fillStyle=acento;ctx.fillRect(0,0,12,500);
- const text=(s:string,x:number,y:number,size:number,color='#f4f6fa')=>{ctx.font=`bold ${size}px "Segoe UI", Arial`;ctx.fillStyle=color;ctx.fillText(s,x,y);};
- const corte=(s:string,max:number,size:number)=>{ctx.font=`bold ${size}px "Segoe UI", Arial`;let t=s.replace(/[\r\n\t]/g,' ');while(t.length&&ctx.measureText(t).width>max)t=t.slice(0,-1);return t.length<s.length?t+'…':t;};
+ const text=(s:string,x:number,y:number,size:number,color='#f4f6fa')=>{ctx.font=`bold ${size}px "Anzy Sans", sans-serif`;ctx.fillStyle=color;ctx.fillText(s,x,y);};
+ const corte=(s:string,max:number,size:number)=>{ctx.font=`bold ${size}px "Anzy Sans", sans-serif`;let t=s.replace(/[\r\n\t]/g,' ');while(t.length&&ctx.measureText(t).width>max)t=t.slice(0,-1);return t.length<s.length?t+'…':t;};
  text('ANZY PROGRAMS  /  '+(d.subiu?'NOVO NÍVEL':'PERFIL DO MEMBRO'),48,48,17,'#a9b6ca');
  ctx.save();ctx.beginPath();ctx.arc(125,155,72,0,Math.PI*2);ctx.clip();ctx.fillStyle='#283447';ctx.fillRect(50,80,150,150);
  const av=d.avatar?await avatarMembro(d.avatar):undefined;if(av)ctx.drawImage(av,53,83,144,144);else text(d.nome.slice(0,1).toUpperCase(),100,177,60);ctx.restore();
@@ -21,6 +22,6 @@ export async function imagemPerfil(d:{nome:string;servidor:string;xp:number;cor:
 }
 export async function imagemReacao(titulo:string,nome:string,outro:string,cor:number){
  const c=createCanvas(900,280),ctx=c.getContext('2d');ctx.fillStyle='#10151f';ctx.fillRect(0,0,900,280);ctx.fillStyle='#'+cor.toString(16).padStart(6,'0');ctx.fillRect(0,0,12,280);
- const text=(s:string,y:number,size:number,color='#ffffff')=>{ctx.font=`bold ${size}px "Segoe UI", Arial`;ctx.fillStyle=color;while(ctx.measureText(s).width>800)s=s.slice(0,-2)+'…';ctx.fillText(s,48,y);};
+ const text=(s:string,y:number,size:number,color='#ffffff')=>{ctx.font=`bold ${size}px "Anzy Sans", sans-serif`;ctx.fillStyle=color;while(ctx.measureText(s).width>800)s=s.slice(0,-2)+'…';ctx.fillText(s,48,y);};
  text('ANZY PROGRAMS  /  INTERAÇÕES',42,16,'#a9b6ca');text(titulo,124,42);text(nome,182,27);text(outro?'> '+outro:'Um momento para compartilhar com o servidor.',230,23,'#b8c4d6');return c.toBuffer('image/png');
 }

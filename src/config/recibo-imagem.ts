@@ -1,3 +1,4 @@
+import './fontes.js';
 import {createCanvas} from '@napi-rs/canvas';
 import {itensDoPedido,type Pedido} from './vendas-store.js';
 const reais=(n:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(n/100);
@@ -5,8 +6,8 @@ export function imagemRecibo(loja:string,o:Pedido,cor:number){
   const c=createCanvas(1000,720),ctx=c.getContext('2d');
   const acento='#'+cor.toString(16).padStart(6,'0');
   ctx.fillStyle='#10151e';ctx.fillRect(0,0,1000,720);ctx.fillStyle=acento;ctx.fillRect(0,0,12,720);
-  const texto=(t:string,x:number,y:number,size=24,color='#edf2f8',bold=false)=>{ctx.font=`${bold?'bold ':''}${size}px "Segoe UI", Arial, sans-serif`;ctx.fillStyle=color;ctx.fillText(t,x,y);};
-  const cortar=(t:string,largura:number,size:number)=>{ctx.font=`bold ${size}px "Segoe UI", Arial, sans-serif`;let v=t.replace(/[\r\n\t]/g,' ');while(v.length&&ctx.measureText(v).width>largura)v=v.slice(0,-1);return v.length<t.length?v.slice(0,-1)+'…':v;};
+  const texto=(t:string,x:number,y:number,size=24,color='#edf2f8',bold=false)=>{ctx.font=`${bold?'bold ':''}${size}px "Anzy Sans", sans-serif`;ctx.fillStyle=color;ctx.fillText(t,x,y);};
+  const cortar=(t:string,largura:number,size:number)=>{ctx.font=`bold ${size}px "Anzy Sans", sans-serif`;let v=t.replace(/[\r\n\t]/g,' ');while(v.length&&ctx.measureText(v).width>largura)v=v.slice(0,-1);return v.length<t.length?v.slice(0,-1)+'…':v;};
   texto('ANZY PROGRAMS  /  RECIBO DA LOJA',55,60,19,'#a8b3c4',true);
   texto(cortar(loja,760,29),55,110,29,'#ffffff',true);
   ctx.fillStyle=acento;ctx.fillRect(810,40,140,42);texto('CONFIRMADO',825,68,16,'#ffffff',true);
