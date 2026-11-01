@@ -1,0 +1,31 @@
+{
+  "name": "discord-bots-central",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "cloud:backup": "node dist/config/nuvem-cli.js backup",
+    "cloud:check": "node dist/config/nuvem-cli.js check",
+    "cloud:restore": "node dist/config/nuvem-cli.js restore"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@napi-rs/canvas": "^1.1.0",
+    "@supabase/supabase-js": "^2.118.0",
+    "discord.js": "^14.28.0",
+    "dotenv": "^18.0.9",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

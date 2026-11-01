@@ -1,0 +1,23 @@
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, ModalBuilder, StringSelectMenuBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
+import { emojiTexto } from './emojis.js';
+export type FormaPagamento={id:string;tipo:'pix_manual'|'link_manual';nome:string;destino:string;titular:string;banco:string;instrucoes:string;ativo:boolean};
+export function validarForma(f:Omit<FormaPagamento,'id'|'ativo'>){
+  if(!f.nome.trim()||f.nome.length>60||!f.destino.trim()||f.destino.length>1000||f.titular.length>100||f.banco.length>100||f.instrucoes.length>800)throw Error('Preencha nome e dados de pagamento dentro dos limites.');
+  if(f.tipo==='pix_manual'){if(f.destino.length>140||!f.titular.trim())throw Error('Informe a chave Pix e o nome do recebedor.');}
+  else if(f.tipo==='link_manual'){let url:URL;try{url=new URL(f.destino);}catch{throw Error('Informe um link HTTPS válido.');}if(url.protocol!=='https:'||url.username||url.password)throw Error('Use um link HTTPS sem credenciais na URL.');}
+  else throw Error('Forma de pagamento inválida.');
+}
+const botao=(id:string,nome:string)=>new ButtonBuilder().setCustomId('sv:'+id).setLabel(nome).setStyle(ButtonStyle.Secondary);
+const linha=(...b:ButtonBuilder[])=>new ActionRowBuilder<ButtonBuilder>().addComponents(b);
+export function painelPagamentos(formas:FormaPagamento[],cor:number,nota=''){
+  const p=new ContainerBuilder().setAccentColor(cor).addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${emojiTexto('pagamentos')} Formas de pagamento da loja\n${nota}\nCada servidor cadastra seus próprios dados de recebimento. Somente administradores podem alterar estas configurações.\n\n${emojiTexto('voltar')} **Pix manual** — chave da loja; o administrador confere o recebimento.\n${emojiTexto('voltar')} **Link de pagamento** — página do próprio vendedor; conferência manual nesta versão.\n${emojiTexto('voltar')} **Ativar / desativar** — controla o que o comprador pode escolher.\n\n**Cadastradas:**\n${formas.map(f=>`${f.ativo?emojiTexto('sucesso'):emojiTexto('aviso')} **${f.nome}** · ${f.tipo==='pix_manual'?'Pix manual':'Link manual'} · ${f.ativo?'Ativa':'Desativada'}`).join('\n')||'Nenhuma forma cadastrada.'}\n\nMercado Pago e Efí automáticos ainda não estão conectados. Não informe tokens bancários nos campos abaixo.`));
+  p.addActionRowComponents(linha(botao('novopag:pix_manual','Cadastrar Pix manual'),botao('novopag:link_manual','Cadastrar link de pagamento'),botao('textoentrega','Instruções e entrega')));
+  if(formas.length)p.addActionRowComponents(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('sv:editarforma').setPlaceholder('Gerenciar uma forma cadastrada').addOptions(formas.map(f=>({label:f.nome,value:f.id,description:f.ativo?'Ativa — visível ao comprador':'Desativada'})))));
+  p.addActionRowComponents(linha(botao('painel','Voltar ao Painel de Vendas')));return {components:[p],flags:32768 as const};
+}
+export function formularioPagamento(tipo:FormaPagamento['tipo'],atual?:FormaPagamento){
+  const campo=(id:string,label:string,value:string,max:number,required=true,long=false)=>{const c=new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(long?TextInputStyle.Paragraph:TextInputStyle.Short).setMaxLength(max).setRequired(required);if(value)c.setValue(value);return new ActionRowBuilder<TextInputBuilder>().addComponents(c);};
+  const m=new ModalBuilder().setCustomId('sv:salvarforma:'+tipo+':'+(atual?.id??'novo')).setTitle(tipo==='pix_manual'?'Pix manual da loja':'Link de pagamento da loja');
+  m.addComponents(campo('nome','Nome para o comprador',atual?.nome??'',60),campo('destino',tipo==='pix_manual'?'Chave Pix da loja (não é token de API)':'Link HTTPS de pagamento do vendedor',atual?.destino??'',tipo==='pix_manual'?140:1000),campo('titular','Nome do recebedor',atual?.titular??'',100,tipo==='pix_manual'),campo('banco','Banco ou instituição (opcional)',atual?.banco??'',100,false),campo('instrucoes','Orientações ao comprador (opcional)',atual?.instrucoes??'',800,false,true));return m;
+}
+export function textoForma(f:FormaPagamento){return `**Forma de pagamento:** ${f.nome}\n${f.tipo==='pix_manual'?'**Chave Pix:** '+f.destino:'[Abrir link de pagamento]('+f.destino+')'}${f.titular?'\n**Recebedor:** '+f.titular:''}${f.banco?'\n**Instituição:** '+f.banco:''}${f.instrucoes?'\n'+f.instrucoes:''}\n\nA confirmação é manual. Aguarde o vendedor conferir o recebimento; enviar um comprovante não aprova o pedido automaticamente.`;}
