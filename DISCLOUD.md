@@ -37,4 +37,4 @@ A instalação atual usa um ZIP já compilado localmente. Não ative deploy auto
 - Resposta pública do callback OAuth2, recusando solicitações sem estado válido.
 - Imagem de perfil em Linux: detectada ausência de texto; corrigida incluindo Noto Sans e sua licença, depois conferida visualmente.
 
-O teste de autorização OAuth2 depende de o usuário concluir o fluxo no Discord. Uma implantação não constitui teste de pagamento bancário real nem de carga com vários bots.
+O usuário concluiu uma nova autorização OAuth2 no endereço .dev. O consentimento recente foi confirmado no arquivo hospedado e na cópia criptografada do Supabase. Não foram realizados pagamento bancário real nem teste de carga com vários bots.
