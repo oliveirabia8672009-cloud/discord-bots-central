@@ -6,6 +6,5 @@ data/
 backups/
 logs/
 dist/
-build/
 *.bak*
 *.zip
