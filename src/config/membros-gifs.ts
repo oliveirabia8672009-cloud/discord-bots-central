@@ -6,7 +6,7 @@ export function criarFonteGifs(http:typeof fetch=fetch){
  const pools=new Map<string,GifAnime[]>(),ultimos=new Map<string,GifAnime>(),carregando=new Map<string,Promise<void>>(),falhouAte=new Map<string,number>();
  async function carregar(categoria:string){
   try{
-   const r=await http('https://nekos.best/api/v2/'+categoria+'?amount=6',{headers:{'User-Agent':'AnzyPrograms (https://discord.gg/Ny2v6wUpJ)'},signal:AbortSignal.timeout(4000)});
+   const r=await http('https://nekos.best/api/v2/'+categoria+'?amount=6',{headers:{'User-Agent':'AnzyPrograms (https://discord.gg/eAy2XQr7qc)'},signal:AbortSignal.timeout(4000)});
    if(!r.ok)throw Error('Serviço indisponível');const raw=await r.text();if(raw.length>100000)throw Error('Resposta inválida');const dados=JSON.parse(raw) as {results?:{url?:unknown;anime_name?:unknown}[]};
    if(!Array.isArray(dados.results))throw Error('Resposta inválida');const gifs:GifAnime[]=[];
    for(const v of dados.results.slice(0,20)){

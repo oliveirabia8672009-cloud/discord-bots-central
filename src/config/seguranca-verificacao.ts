@@ -6,14 +6,19 @@ import {type StoreSeguranca,type MudancaVerificacao} from './seguranca-store.js'
 export function instalarVerificacao(store:StoreSeguranca,dataDir:string){
   const ocupados=new Set<string>();
   function salvar(g:string,p:Partial<ReturnType<typeof store.obter>['config']['verificacao']>){store.configurar(g,{verificacao:{...store.obter(g).config.verificacao,...p}});}
-  async function cargo(g:Guild){
+  async function cargo(g:Guild,validarAcessosIniciais=true){
     const c=store.obter(g.id).config,v=c.verificacao;
     const r=v.cargo?await g.roles.fetch(v.cargo):null,me=await g.members.fetchMe();
     if(!r||r.id===g.id||r.managed||r.permissions.bitfield!==0n||c.cargos.includes(r.id))throw Error('Escolha um cargo exclusivo de verificação, sem permissões gerais e fora dos cargos staff protegidos.');
     if(!me.permissions.has(P.ManageRoles)||me.roles.highest.comparePositionTo(r)<=0)throw Error('O bot precisa de Gerenciar cargos e cargo acima do cargo Verificado.');
     const arq=join(dataDir,'outros.json');if(existsSync(arq)&&JSON.parse(readFileSync(arq,'utf8'))[g.id]?.autoRole===r.id)throw Error('O cargo Verificado não pode ser o cargo automático de entrada.');
-    const cs=await g.channels.fetch(),protegidos=new Set(v.mudancas.map(x=>x.canal));
-    for(const ch of cs.values())if(ch&&ch.type!==ChannelType.GuildCategory&&!protegidos.has(ch.id)&&!ch.permissionsFor(g.roles.everyone)?.has(P.ViewChannel)&&ch.permissionsFor(r)?.has(P.ViewChannel))throw Error('Esse cargo já libera um canal privado. Crie um cargo Verificado exclusivo, sem acessos anteriores.');
+    // This is an activation precondition, not an invariant of an already active role.
+    // After activation the owner can intentionally give Verificado access to new channels.
+    // Reapplying this scan during OAuth rejects that configured role without changing access.
+    if(validarAcessosIniciais){
+      const cs=await g.channels.fetch(),protegidos=new Set(v.mudancas.map(x=>x.canal));
+      for(const ch of cs.values())if(ch&&ch.type!==ChannelType.GuildCategory&&!protegidos.has(ch.id)&&!ch.permissionsFor(g.roles.everyone)?.has(P.ViewChannel)&&ch.permissionsFor(r)?.has(P.ViewChannel))throw Error('Esse cargo já libera um canal privado. Crie um cargo Verificado exclusivo, sem acessos anteriores.');
+    }
     return r;
   }
   const valor=(c:any,id:string):boolean|null=>{const p=c.permissionOverwrites.cache.get(id);return p?.allow.has(P.ViewChannel)?true:p?.deny.has(P.ViewChannel)?false:null;};
@@ -68,10 +73,14 @@ export function instalarVerificacao(store:StoreSeguranca,dataDir:string){
   async function desativar(g:Guild){if(ocupados.has(g.id))throw Error('Configuração em andamento.');ocupados.add(g.id);try{return await restaurarInterno(g);}finally{ocupados.delete(g.id);}}
   async function concluir(g:Guild,u:string){
     const c=store.obter(g.id).config.verificacao;if(!c.ativo)return '';
-    const r=await cargo(g),m=await g.members.fetch({user:u,force:true});
+    // Only grant the role already selected by the owner; never edit channel permissions here.
+    const r=await cargo(g,false),m=await g.members.fetch({user:u,force:true});
     if(m.pending)throw Error('Conclua primeiro a triagem de membros do Discord e verifique novamente.');
     if(!store.obter(g.id).config.verificacao.ativo)throw Error('A verificação foi desativada durante a solicitação.');
-    await m.roles.add(r,'Verificação concluída pela conta autorizada via OAuth2.');return 'Verificação concluída! O cargo de acesso foi entregue. Os canais privados da equipe continuam restritos.';
+    if(!m.roles.cache.has(r.id))await m.roles.add(r,'Verificação concluída pela conta autorizada via OAuth2.');
+    const confirmado=await g.members.fetch({user:u,force:true});
+    if(!confirmado.roles.cache.has(r.id))throw Error('O cargo de verificação não permaneceu no membro. Peça à equipe para conferir as permissões e outras automações de cargos.');
+    return 'Verificação concluída! O cargo de acesso configurado foi confirmado na sua conta. As permissões dos canais não foram alteradas.';
   }
   return{salvar,cargo,planejar,aplicar,desativar,concluir};
 }

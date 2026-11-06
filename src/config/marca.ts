@@ -1,4 +1,4 @@
-export const DESCRICAO_ANZY = 'Adquira seu bot personalizável com Anzy Programs!\nEntre no nosso servidor: https://discord.gg/Ny2v6wUpJ';
+export const DESCRICAO_ANZY = 'Adquira seu bot personalizável com Anzy Programs!\nEntre no nosso servidor: https://discord.gg/eAy2XQr7qc';
 
 type Aplicacao = {
   description: string | null;

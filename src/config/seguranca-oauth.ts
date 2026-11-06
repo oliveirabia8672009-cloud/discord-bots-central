@@ -1,10 +1,12 @@
+import {ambienteBot,contextoAtual,noContexto} from './contexto-bot.js';
+import {registrarOAuthCentral} from './oauth-central.js';
 import {createServer,type Server} from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {Routes,PermissionFlagsBits as P,type Client} from 'discord.js';
 import {cofre,type StoreSeguranca} from './seguranca-store.js';
 type Credencial={access:string;refresh:string;expira:number;consentiu:number;guild:string;user:string};
 type Opcoes={clientId:string;secret:string;redirect:string;port:number;host:string};
-export function configOAuth(env:NodeJS.ProcessEnv=process.env):Opcoes|null{
+export function configOAuth(env:NodeJS.ProcessEnv=ambienteBot()):Opcoes|null{
   const clientId=env.DISCORD_CLIENT_ID??'',secret=env.DISCORD_CLIENT_SECRET??'',redirect=env.ANZY_OAUTH_REDIRECT_URI??'';
   if(!clientId||!secret||!redirect)return null;
   const u=new URL(redirect),port=Number(env.ANZY_OAUTH_PORT??8787),host=env.ANZY_OAUTH_HOST??'127.0.0.1';
@@ -12,7 +14,7 @@ export function configOAuth(env:NodeJS.ProcessEnv=process.env):Opcoes|null{
   return{clientId,secret,redirect,port,host};
 }
 export function instalarOAuth(bot:Client,store:StoreSeguranca,opcoes:Opcoes|null=configOAuth(),http:typeof fetch=fetch,aposAutorizar?:(g:string,u:string)=>Promise<string>){
-  const estados=new Map<string,{g:string;u:string;vence:number;versao:number}>(),revogacoes=new Map<string,number>();let server:Server|undefined,disponivel=false;
+  const estados=new Map<string,{g:string;u:string;vence:number;versao:number}>(),revogacoes=new Map<string,number>();let server:Server|undefined,disponivel=false,removerCentral:(()=>void)|undefined;
   const tokens=()=>cofre(store.pasta);
   async function token(body:Record<string,string>){
     if(!opcoes)throw Error('OAuth2 ainda não configurado.');
@@ -26,7 +28,7 @@ export function instalarOAuth(bot:Client,store:StoreSeguranca,opcoes:Opcoes|null
     if(!opcoes||!disponivel)throw Error('OAuth2 indisponível. A programadora precisa configurar o endereço de autenticação e as credenciais.');
     for(const [id,v]of estados)if(v.vence<Date.now())estados.delete(id);
     if(estados.size>=500)throw Error('Muitas solicitações. Tente novamente mais tarde.');
-    const state=randomBytes(32).toString('hex');estados.set(state,{g,u,vence:Date.now()+600000,versao:revogacoes.get(g+':'+u)??0});
+    const state=(contextoAtual()?opcoes.clientId+'.':'')+randomBytes(32).toString('hex');estados.set(state,{g,u,vence:Date.now()+600000,versao:revogacoes.get(g+':'+u)??0});
     const url=new URL('https://discord.com/oauth2/authorize');url.search=new URLSearchParams({client_id:opcoes.clientId,response_type:'code',redirect_uri:opcoes.redirect,scope:'identify guilds.join',state,prompt:'consent'}).toString();return url.toString();
   }
   async function callback(url:URL){
@@ -41,7 +43,10 @@ export function instalarOAuth(bot:Client,store:StoreSeguranca,opcoes:Opcoes|null
     const guild=await bot.guilds.fetch(esperado.g);if(!await guild.members.fetch(esperado.u).catch(()=>null))throw Error('Entre no servidor antes de autorizar.');
     if((revogacoes.get(esperado.g+':'+esperado.u)??0)!==esperado.versao)throw Error('Autorização revogada durante a solicitação. Gere outro link.');
     store.autorizar(esperado.g,esperado.u,tokens().cifrar({...t,user:esperado.u,guild:esperado.g,consentiu:Date.now()}));
-    let verificacao='';if(aposAutorizar)try{verificacao=await aposAutorizar(esperado.g,esperado.u);}catch{verificacao='A autorização foi salva, mas o cargo de verificação não foi entregue. Conclua a triagem do Discord, se houver, e tente novamente. Se persistir, peça à equipe para conferir as permissões do bot.';}
+    let verificacao='';if(aposAutorizar)try{verificacao=await aposAutorizar(esperado.g,esperado.u);}catch{
+      console.warn('OAuth2: autorização salva, entrega do cargo de verificação não confirmada. Servidor: '+esperado.g);
+      return 'Atenção: a verificação de acesso NÃO foi concluída. A autorização de recuperação foi salva, mas a entrega do cargo configurado não foi confirmada. Conclua a triagem do Discord, se houver, e tente novamente pelo botão de verificação. Se persistir, peça à equipe para conferir o cargo configurado, a hierarquia, Gerenciar cargos e outras automações. Use /revokeauth para apagar o consentimento de recuperação; isso não remove cargos já recebidos.';
+    }
     return 'Autorização concluída. Você consentiu em ser readicionado apenas a este mesmo servidor. '+(verificacao||'Nenhum cargo de acesso foi alterado.')+' Use /revokeauth para apagar a autorização de recuperação local; isso não remove cargos já recebidos. Você também pode revogar o aplicativo em Configurações do Discord > Aplicativos autorizados.';
   }
   const restaurando=new Set<string>();
@@ -66,7 +71,8 @@ export function instalarOAuth(bot:Client,store:StoreSeguranca,opcoes:Opcoes|null
     if(opcoes)try{const c=tokens().abrir<Credencial>(cifra);await http('https://discord.com/api/oauth2/token/revoke',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:opcoes.clientId,client_secret:opcoes.secret,token:c.refresh,token_type_hint:'refresh_token'}),signal:AbortSignal.timeout(10000)});}catch{/* Local consent is already removed. */}
   }
   async function iniciar(){
-    if(!opcoes||server)return;
+    if(!opcoes||server||removerCentral)return;
+    const ctx=contextoAtual();if(ctx){removerCentral=await registrarOAuthCentral(opcoes, url=>noContexto(ctx,()=>callback(url)));disponivel=true;ctx.limpar.add(()=>{disponivel=false;removerCentral?.();});return;}
     server=createServer((req,res)=>{
       res.setHeader('Content-Type','text/plain; charset=utf-8');res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');
       if(req.method!=='GET'||!req.url||req.url.length>4096){res.writeHead(400).end('Requisição inválida.');return;}
@@ -76,5 +82,5 @@ export function instalarOAuth(bot:Client,store:StoreSeguranca,opcoes:Opcoes|null
     await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(opcoes.port,opcoes.host,()=>{server!.removeListener('error',reject);disponivel=true;resolve();});});
     server.on('error',()=>{disponivel=false;console.error('Servidor OAuth2 indisponível.');});server.unref();
   }
-  return{emitir,callback,restaurar,revogar,iniciar,pronto:()=>disponivel,configurado:()=>!!opcoes,parar:()=>{disponivel=false;server?.close();server=undefined;}};
+  return{emitir,callback,restaurar,revogar,iniciar,pronto:()=>disponivel,configurado:()=>!!opcoes,parar:()=>{disponivel=false;removerCentral?.();removerCentral=undefined;server?.close();server=undefined;}};
 }

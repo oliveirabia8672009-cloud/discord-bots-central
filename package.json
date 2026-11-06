@@ -11,18 +11,24 @@
     "cloud:check": "node dist/config/nuvem-cli.js check",
     "cloud:restore": "node dist/config/nuvem-cli.js restore",
     "build:discloud": "tsc -p tsconfig.discloud.json",
-    "start:discloud": "node start-discloud.mjs"
+    "start:discloud": "node start-discloud.mjs",
+    "bots:add": "node dist/central-cli.js add",
+    "bots:list": "node dist/central-cli.js list"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@discordjs/voice": "^0.19.2",
     "@napi-rs/canvas": "^1.1.0",
     "@supabase/supabase-js": "^2.118.0",
+    "@tesseract.js-data/por": "1.0.0",
     "discord.js": "^14.28.0",
     "dotenv": "^18.0.9",
-    "qrcode": "^1.5.4"
+    "pdfjs-dist": "4.10.38",
+    "qrcode": "^1.5.4",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

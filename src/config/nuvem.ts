@@ -1,3 +1,5 @@
+import {arquivoDados,ambienteBot} from './contexto-bot.js';
+import {intervaloBot} from './contexto-bot.js';
 import {existsSync,lstatSync,readdirSync,readFileSync,mkdirSync,writeFileSync,renameSync,rmSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -10,14 +12,15 @@ type Arquivo={nome:string;conteudo:string};
 type Copia={versao:1;bot:string;arquivos:Arquivo[]};
 type Envelope={versao:1;cifrado:string;hash:string;criado:string};
 type Registro={payload:Envelope;revision:number};
-type Opcoes={url:string;secret:string;chave:Buffer;bot:string;pasta:string};
-const nomeSeguro=(s:string)=>s.length<240&&/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+$/.test(s)&&!s.split('/').some(p=>p==='.'||p==='..'||p.startsWith('.'))&&(s==='seguranca/chave-local'||/\.(json|html|enc)$/.test(s));
-export function configNuvem(env:NodeJS.ProcessEnv=process.env,pasta=pastaDados):Opcoes|null{
+type Opcoes={modulo?:string;url:string;secret:string;chave:Buffer;bot:string;pasta:string};
+const nomeSeguro=(s:string)=>s.length<240&&/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+$/.test(s)&&!s.split('/').some(p=>p==='.'||p==='..'||p.startsWith('.'))&&(s==='seguranca/chave-local'||/\.(json|html|enc|access)$/.test(s));
+export function configNuvem(env:NodeJS.ProcessEnv=ambienteBot(),pasta=arquivoDados()):Opcoes|null{
   if(env.ANZY_CLOUD_BACKUP!=='true')return null;
   const url=env.SUPABASE_URL??'',secret=env.SUPABASE_SECRET_KEY??'',bot=env.DISCORD_CLIENT_ID??'',hex=env.ANZY_BACKUP_KEY??'';
   const u=new URL(url);
   if(u.protocol!=='https:'||!u.hostname.endsWith('.supabase.co')||u.pathname!=='/'||u.search||u.hash||u.username||u.password||!secret||!/^\d{17,20}$/.test(bot)||!/^([a-f0-9]{64})$/i.test(hex))throw Error('Configuração de cópia em nuvem incompleta ou inválida.');
-  return{url:u.origin,secret,chave:Buffer.from(hex,'hex'),bot,pasta:resolve(pasta)};
+  const modulo=env.ANZY_BACKUP_MODULE??MODULO;if(!/^backup_arquivos_v1(?:_[a-f0-9]{32})?$/.test(modulo))throw Error('Namespace da cópia inválido.');
+  return{modulo,url:u.origin,secret,chave:Buffer.from(hex,'hex'),bot,pasta:resolve(pasta)};
 }
 export function coletarArquivos(pasta:string):Arquivo[]{
   const arquivos:Arquivo[]=[];let bytes=0;
@@ -27,7 +30,7 @@ export function coletarArquivos(pasta:string):Arquivo[]{
     for(const nome of readdirSync(dir).sort()){
       const caminho=join(dir,nome),s=lstatSync(caminho),rel=prefixo+nome;
       if(s.isSymbolicLink())throw Error('Link encontrado na pasta de dados.');
-      if(s.isDirectory()){visitar(caminho,rel+'/');continue;}
+      if(s.isDirectory()){if(prefixo===''&&['bots','bots-arquivados'].includes(nome))continue;visitar(caminho,rel+'/');continue;}
       if(!s.isFile()||rel.endsWith('.tmp'))continue;
       if(!nomeSeguro(rel))throw Error('Arquivo não previsto na pasta de dados.');
       if(arquivos.length>=1000||bytes+s.size>LIMITE)throw Error('Cópia acima do limite: 1000 arquivos ou 20 MB.');
@@ -69,7 +72,8 @@ export function restaurarCopia(c:Copia,pasta:string,bot:string){
   catch(err){for(const p of criados)rmSync(p,{force:true});throw err;}
 }
 export function criarCopiaNuvem(op:Opcoes,http:typeof fetch=fetch){
-  const base=op.url+'/rest/v1/anzy_bot_state',filtro='?bot_id=eq.'+op.bot+'&module=eq.'+MODULO;
+  const modulo=op.modulo??MODULO;
+  const base=op.url+'/rest/v1/anzy_bot_state',filtro='?bot_id=eq.'+op.bot+'&module=eq.'+modulo;
   const headers={apikey:op.secret,'Content-Type':'application/json'};
   let revision:number|null=null,ultimoHash='',ocupado=false,conflito=false;
   async function ler():Promise<Registro|null>{
@@ -88,7 +92,7 @@ export function criarCopiaNuvem(op:Opcoes,http:typeof fetch=fetch){
       const c:Copia={versao:1,bot:op.bot,arquivos:coletarArquivos(op.pasta)};
       if(!c.arquivos.length)throw Error('Pasta de dados vazia: cópia anterior preservada.');
       const payload=cifrarCopia(c,op.chave);if(payload.hash===ultimoHash)return false;
-      const proxima=(revision??0)+1,body=revision===null?{bot_id:op.bot,module:MODULO,payload,revision:proxima,updated_at:new Date().toISOString()}:{payload,revision:proxima,updated_at:new Date().toISOString()};
+      const proxima=(revision??0)+1,body=revision===null?{bot_id:op.bot,module:modulo,payload,revision:proxima,updated_at:new Date().toISOString()}:{payload,revision:proxima,updated_at:new Date().toISOString()};
       const r=await http(base+(revision===null?'':filtro+'&revision=eq.'+revision),{method:revision===null?'POST':'PATCH',headers:{...headers,Prefer:'return=representation'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
       if(r.status===409){conflito=true;throw Error('Cópia alterada por outra instância.');}
       if(!r.ok)throw Error('Não foi possível atualizar a cópia no Supabase.');
@@ -98,13 +102,13 @@ export function criarCopiaNuvem(op:Opcoes,http:typeof fetch=fetch){
   }
   return{preparar,salvar,ler};
 }
-export async function iniciarCopiaNuvem(env:NodeJS.ProcessEnv=process.env){
+export async function iniciarCopiaNuvem(env:NodeJS.ProcessEnv=ambienteBot()){
   const op=configNuvem(env);if(!op)return;
   if(env.RAILWAY_ENVIRONMENT_ID&&env.RAILWAY_VOLUME_MOUNT_PATH!=='/app/data')throw Error('Monte um volume permanente em /app/data antes de iniciar o bot no Railway.');
   const nuvem=criarCopiaNuvem(op),vazia=!existsSync(op.pasta)||readdirSync(op.pasta).length===0;
   await nuvem.preparar(env.ANZY_RESTORE_IF_EMPTY==='true'&&vazia);
   if(vazia&&env.ANZY_RESTORE_IF_EMPTY!=='true')throw Error('Pasta vazia: restaure os dados antes de iniciar o bot.');
   await nuvem.salvar();
-  const timer=setInterval(()=>{void nuvem.salvar().catch(()=>console.error('Cópia Supabase pendente. Dados preservados no volume local; confira conexão e instâncias duplicadas.'));},30000);timer.unref();
+  const timer=intervaloBot(()=>{void nuvem.salvar().catch(()=>console.error('Cópia Supabase pendente. Dados preservados no volume local; confira conexão e instâncias duplicadas.'));},30000);timer.unref();
   console.log('Cópia criptografada Supabase ativa; armazenamento principal no volume local.');
 }

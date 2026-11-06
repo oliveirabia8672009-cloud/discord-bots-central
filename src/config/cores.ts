@@ -1,3 +1,4 @@
+import {arquivoDados} from './contexto-bot.js';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ export function interpretarCor(valor: string): number | null {
 }
 export function formatarCor(cor: number): string { return '#' + cor.toString(16).padStart(6, '0').toUpperCase(); }
 
-export function criarConfiguracaoCores(arquivo = fileURLToPath(new URL('../../data/cores.json', import.meta.url))) {
+export function criarConfiguracaoCores(arquivo = arquivoDados('cores.json')) {
   let dados: Record<string, number> = {};
   if (existsSync(arquivo)) {
     const carregado: unknown = JSON.parse(readFileSync(arquivo, 'utf8'));

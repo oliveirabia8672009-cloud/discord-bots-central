@@ -1,3 +1,4 @@
+import {arquivoDados} from './contexto-bot.js';
 import {existsSync,readFileSync,writeFileSync,mkdirSync,renameSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -5,14 +6,14 @@ import {randomBytes,createCipheriv,createDecipheriv,createHash} from 'node:crypt
 export const pastaSeguranca=fileURLToPath(new URL('../../data/seguranca',import.meta.url));
 export type MudancaVerificacao={canal:string;alvo:string;antes:boolean|null;depois:boolean};
 export const mensagemVerificacaoPadrao=()=>({titulo:'Verificação + OAuth2',texto:'Clique no botão abaixo para verificar sua conta na página oficial do Discord e liberar seu acesso aos canais protegidos.',imagem:'',botao:'Verificar minha conta',painel:null as {canal:string;mensagem:string}|null});
-export type ConfigSeguranca={mensagemVerificacao:ReturnType<typeof mensagemVerificacaoPadrao>;verificacao:{canal:string|null;cargo:string|null;ativo:boolean;mudancas:MudancaVerificacao[]};logs:string|null;raid:boolean;limite:number;janela:number;conter:boolean;staff:boolean;cargos:string[];confiaveis:string[];fraude:boolean;valor:number;dias:number;tentativas:number;backupHoras:number;ultimoBackup:number;proximaTentativa:number};
+export type ConfigSeguranca={mensagemVerificacao:ReturnType<typeof mensagemVerificacaoPadrao>;verificacao:{canal:string|null;cargo:string|null;ativo:boolean;mudancas:MudancaVerificacao[]};logs:string|null;raid:boolean;limite:number;janela:number;conter:boolean;staff:boolean;cargos:string[];confiaveis:string[];fraude:boolean;valor:number;dias:number;tentativas:number;backupHoras:number;ultimoBackup:number;proximaTentativa:number;armadilha:{ativa:boolean;canal:string|null;logs:string|null;modo:'simples'|'inteligente';aviso:string;avisoEmbed:boolean;excecoesUsuarios:string[];excecoesCargos:string[];acao:'alertar'|'apagar'|'timeout'|'expulsar'|'banir';limiar:number}};
 export type Incidente={id:string;tipo:string;texto:string;quando:number};
 type D={config:ConfigSeguranca;incidentes:Incidente[];revisoes:Record<string,{assinatura:string;ator:string;motivo:string;quando:number}>;oauth:Record<string,string>};
-const padrao=():D=>({config:{mensagemVerificacao:mensagemVerificacaoPadrao(),verificacao:{canal:null,cargo:null,ativo:false,mudancas:[]},logs:null,raid:false,limite:5,janela:10,conter:false,staff:false,cargos:[],confiaveis:[],fraude:false,valor:50000,dias:7,tentativas:3,backupHoras:0,ultimoBackup:0,proximaTentativa:0},incidentes:[],revisoes:{},oauth:{}});
+const padrao=():D=>({config:{mensagemVerificacao:mensagemVerificacaoPadrao(),verificacao:{canal:null,cargo:null,ativo:false,mudancas:[]},logs:null,raid:false,limite:5,janela:10,conter:false,staff:false,cargos:[],confiaveis:[],fraude:false,valor:50000,dias:7,tentativas:3,backupHoras:0,ultimoBackup:0,proximaTentativa:0,armadilha:{ativa:false,canal:null,logs:null,modo:'simples',aviso:'🚨 ARMADILHA DE SEGURANÇA\nNão envie mensagens neste canal. Ele é monitorado pela equipe.',avisoEmbed:true,excecoesUsuarios:[],excecoesCargos:[],acao:'alertar',limiar:4}},incidentes:[],revisoes:{},oauth:{}});
 export function escreverAtomico(arquivo:string,valor:unknown){mkdirSync(dirname(arquivo),{recursive:true});writeFileSync(arquivo+'.tmp',JSON.stringify(valor,null,2),{mode:0o600});renameSync(arquivo+'.tmp',arquivo);}
-export function criarStoreSeguranca(pasta=pastaSeguranca){
+export function criarStoreSeguranca(pasta=arquivoDados('seguranca')){
   const arquivo=join(pasta,'config.json');let dados:Record<string,D>=existsSync(arquivo)?JSON.parse(readFileSync(arquivo,'utf8')):{};
-  const obter=(g:string):D=>{const d=dados[g],base=padrao();const c=d?{...base,...d,config:{...base.config,...d.config}}:base;return structuredClone({...c,config:{...c.config,mensagemVerificacao:{...mensagemVerificacaoPadrao(),...c.config.mensagemVerificacao}}});};
+  const obter=(g:string):D=>{const d=dados[g],base=padrao();const c=d?{...base,...d,config:{...base.config,...d.config}}:base;return structuredClone({...c,config:{...c.config,mensagemVerificacao:{...mensagemVerificacaoPadrao(),...c.config.mensagemVerificacao},armadilha:{...base.config.armadilha,...c.config.armadilha}}});};
   function alterar<T>(g:string,fn:(d:D)=>T){const d=obter(g),r=fn(d),novos={...dados,[g]:d};escreverAtomico(arquivo,novos);dados=novos;return r;}
   return{pasta,obter,configurar:(g:string,p:Partial<ConfigSeguranca>)=>alterar(g,d=>{Object.assign(d.config,p);}),
     incidente:(g:string,tipo:string,texto:string)=>alterar(g,d=>{const i={id:randomBytes(8).toString('hex'),tipo,texto,quando:Date.now()};d.incidentes.push(i);d.incidentes=d.incidentes.slice(-200);return i;}),
@@ -22,7 +23,7 @@ export function criarStoreSeguranca(pasta=pastaSeguranca){
   };
 }
 export type StoreSeguranca=ReturnType<typeof criarStoreSeguranca>;
-export function cofre(pasta=pastaSeguranca){
+export function cofre(pasta=arquivoDados('seguranca')){
   mkdirSync(pasta,{recursive:true});const arquivo=join(pasta,'chave-local');
   if(!existsSync(arquivo))writeFileSync(arquivo,randomBytes(32),{flag:'wx',mode:0o600});
   const chave=readFileSync(arquivo);if(chave.length!==32)throw Error('Chave local de segurança inválida.');

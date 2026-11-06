@@ -1,3 +1,6 @@
+import {podeConfigurar} from './acessos.js';
+import {painelNaMensagem} from './painel-v2.js';
+import {arquivoDados} from './contexto-bot.js';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +40,7 @@ export type CasoModeracao = {id:number;acao:Acao;alvo:string;ator:string;motivo:
 type Tranca = {antes:boolean|null;caso:number};
 type Dados = {config:Config;seq:number;casos:CasoModeracao[];trancas:Record<string,Tranca>};
 const padrao = ():Dados => ({config:{logs:null,roles:[],dm:true,eventos:nomesModeracao.filter(n=>!['warnings','modhistory'].includes(n))},seq:0,casos:[],trancas:{}});
-export function criarStoreModeracao(arquivo=fileURLToPath(new URL('../../data/moderacao.json',import.meta.url))) {
+export function criarStoreModeracao(arquivo=arquivoDados('moderacao.json')) {
   let dados:Record<string,Dados> = existsSync(arquivo)?JSON.parse(readFileSync(arquivo,'utf8')):{};
   if(!dados || typeof dados!=='object' || Array.isArray(dados)) throw Error('Arquivo de moderação inválido.');
   const obter=(id:string):Dados=>structuredClone(dados[id]??padrao());
@@ -81,7 +84,7 @@ export function instalarModeracao(bot:Client,cor:(id:string|null)=>number,store:
     ]);
     return {embeds:[emb(g,`${e('moderacao')} Moderação • Configurações`,desc)],components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),new ActionRowBuilder<ButtonBuilder>().addComponents(botao('mod:close','Fechar configurações','fechar'))],allowedMentions:{parse:[] as const}};
   }
-  async function responder(i:any,p:any){if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,flags:MessageFlags.Ephemeral});}
+  async function responder(i:any,p:any){p=painelNaMensagem(i,p);if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,flags:MessageFlags.Ephemeral});}
   async function erro(i:any,s:string){await responder(i,{content:`${e('erro')} ${s}`,embeds:[],components:[],allowedMentions:{parse:[]}});}
   async function membro(g:Guild,id:string){return g.members.fetch({user:id,force:true}).catch(()=>null);}
   async function autorizar(g:Guild,atorId:string,acao:Acao,canal?:Canal){
@@ -207,10 +210,9 @@ export function instalarModeracao(bot:Client,cor:(id:string|null)=>number,store:
     try{
       if(!i.inGuild()||!i.guild){await erro(i,'Use a moderação dentro de um servidor.');return true;}
       if(entrada||custom.startsWith('mod:')&&!custom.startsWith('mod:confirm:')&&!custom.startsWith('mod:cancel:')&&!custom.startsWith('mod:hist:')){
-        if(!i.memberPermissions?.has(P.Administrator)){await erro(i,'Apenas administradores podem configurar a moderação.');return true;}
+        if(!podeConfigurar(i)){await erro(i,'Apenas administradores podem configurar a moderação.');return true;}
         if(i.isMessageComponent())await i.deferUpdate();
-        // Central uses Components V2; send a separate conventional ephemeral configuration panel.
-        if(entrada){await i.followUp({...painel(i.guildId),flags:MessageFlags.Ephemeral});return true;}
+        if(entrada){await responder(i,painel(i.guildId));return true;}
         if(custom==='mod:close'){await responder(i,{content:`${e('fechar')} Configurações de moderação fechadas. A central administrativa continua disponível na mensagem anterior.`,embeds:[],components:[]});return true;}
         if(custom==='mod:home'){await responder(i,painel(i.guildId));return true;}
         if(i.isStringSelectMenu()&&custom==='mod:menu'){

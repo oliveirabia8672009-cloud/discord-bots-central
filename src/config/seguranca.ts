@@ -1,3 +1,7 @@
+import {podeConfigurar,acessoCompleto} from './acessos.js';
+import {painelNaMensagem} from './painel-v2.js';
+import {intervaloBot} from './contexto-bot.js';
+import {arquivoDados} from './contexto-bot.js';
 import {readFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -8,8 +12,9 @@ import {criarStoreSeguranca,analisarRisco,assinaturaRisco,type StoreSeguranca,ty
 import {instalarBackups} from './seguranca-backup.js';
 import {instalarVerificacao} from './seguranca-verificacao.js';
 import {instalarOAuth} from './seguranca-oauth.js';
+import {criarDetectorArmadilha} from './seguranca-armadilha.js';
 export const comandosSeguranca=[
-  new SlashCommandBuilder().setName('security').setDescription('Abre as configurações de segurança e backups.').setDMPermission(false).setDefaultMemberPermissions(P.Administrator),
+  new SlashCommandBuilder().setName('security').setDescription('Abre as configurações de segurança e backups.').setDMPermission(false).setDefaultMemberPermissions(null),
   new SlashCommandBuilder().setName('verify').setDescription('Autoriza voluntariamente a recuperação da sua entrada neste servidor.').setDMPermission(false),
   new SlashCommandBuilder().setName('revokeauth').setDescription('Apaga sua autorização de recuperação neste servidor.').setDMPermission(false),
   new SlashCommandBuilder().setName('restoremember').setDescription('Dono: recupera um membro que consentiu via OAuth2 neste mesmo servidor.').setDMPermission(false).setDefaultMemberPermissions(P.Administrator).addStringOption(o=>o.setName('user_id').setDescription('ID do usuário que autorizou a recuperação.').setRequired(true).setMinLength(17).setMaxLength(20)),
@@ -17,7 +22,8 @@ export const comandosSeguranca=[
 const safe=(s:string,n=1200)=>escapeMarkdown(s.replaceAll('@','@\u200b')).slice(0,n);
 const linha=(s:string)=>e('voltar')+' '+s;
 const field=(id:string,label:string,value:string,max=6)=>new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId(id).setLabel(label).setValue(value).setMaxLength(max).setRequired(true).setStyle(TextInputStyle.Short));
-export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:StoreSeguranca=criarStoreSeguranca(),dataDir=fileURLToPath(new URL('../../data',import.meta.url))){
+export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:StoreSeguranca=criarStoreSeguranca(),dataDir=arquivoDados('')){
+  const detector=criarDetectorArmadilha();
   const verificacao=instalarVerificacao(store,dataDir);const aposAutorizar=async(g:string,u:string)=>verificacao.concluir(await bot.guilds.fetch(g),u);
   const backups=instalarBackups(store,dataDir);let oauth:ReturnType<typeof instalarOAuth>;
   try{oauth=instalarOAuth(bot,store,undefined,undefined,aposAutorizar);}catch{console.error('Configuração OAuth2 inválida; recurso desativado.');oauth=instalarOAuth(bot,store,null,undefined,aposAutorizar);}
@@ -25,9 +31,10 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
   const row=(...b:ButtonBuilder[])=>new ActionRowBuilder<ButtonBuilder>().addComponents(b);
   const back=()=>row(btn('home','Voltar à segurança'),btn('close','Fechar','fechar'));
   const tela=(g:string,t:string,d:string,rows:ActionRowBuilder<any>[]=[back()])=>({embeds:[new EmbedBuilder().setColor(cor(g)).setTitle(e('permissoes')+' '+t).setDescription(d).setFooter({text:'Anzy Programs • Segurança e Proteção'})],components:rows,allowedMentions:{parse:[] as never[]}});
-  async function enviar(i:any,p:any){if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,flags:MessageFlags.Ephemeral});}
+  async function enviar(i:any,p:any){p=painelNaMensagem(i,p);if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,flags:(p.flags??0)|MessageFlags.Ephemeral});}
   const entradas=new Map<string,number[]>(),raidAte=new Map<string,number>(),ultimosAvisos=new Map<string,number>(),membrosVistos=new Map<string,number>(),auditoriasVistas=new Map<string,number>();
   const confirmacoes=new Map<string,{g:string;u:string;tipo:string;id:string;vence:number}>(),jobs=new Set<string>();
+  const confirmacoesArmadilha=new Map<string,{g:string;u:string;acao:'timeout'|'expulsar'|'banir';vence:number}>();
   async function incidente(g:Guild,tipo:string,texto:string){
     const registro=store.incidente(g.id,tipo,texto),id=store.obter(g.id).config.logs;
     if(id)try{const ch=await g.channels.fetch(id);if(ch?.type===ChannelType.GuildText)await ch.send(tela(g.id,'Alerta • '+tipo,`${linha(safe(texto,2800))}\n\n**Registro:** ${registro.id}\n**Horário:** <t:${Math.floor(registro.quando/1000)}:F>`,[]));}catch{console.warn('Segurança: incidente salvo, canal de alertas indisponível.');}
@@ -61,6 +68,23 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
     if(a.action===AuditLogEvent.RoleDelete&&a.targetId&&c.cargos.includes(a.targetId))await incidente(g,'Cargo staff excluído',`Cargo ${a.targetId} excluído por ${a.executorId}. Confira os backups. Cargos privilegiados não são recriados automaticamente.`);
   }
   bot.on(Events.GuildMemberAdd,m=>{void entrada(m).catch(()=>console.error('Falha ao processar proteção de entrada.'));});
+  bot.on(Events.MessageCreate,m=>{void (async()=>{
+    if(!m.guild||!m.member||m.author.bot||m.author.id===m.guild.ownerId)return;
+    const c=store.obter(m.guild.id).config.armadilha;if(!c.ativa)return;
+    if(c.excecoesUsuarios.includes(m.author.id)||m.member.roles.cache.some(r=>c.excecoesCargos.includes(r.id))||m.member.permissions.has(P.Administrator))return;
+    const r=detector.analisar(m.guild.id,m.author.id,{canal:m.channelId,texto:m.content,quando:Date.now()},c.canal,c.modo,c.limiar);
+    if(!r.revisao)return;
+    const naArmadilha=m.channelId===c.canal;let acao='registrar';
+    if(naArmadilha&&c.acao!=='alertar'){
+      if(['apagar','timeout','expulsar','banir'].includes(c.acao)){const ok=await m.delete().then(()=>true,()=>false);if(ok)acao='mensagem excluída';}
+      if(c.acao==='timeout'&&m.member.moderatable){const ok=await m.member.timeout(60000,'Mensagem no canal armadilha; revisar incidente').then(()=>true,()=>false);if(ok)acao+='; timeout de 1 minuto';}
+      if(c.acao==='expulsar'&&m.member.kickable){const ok=await m.member.kick('Mensagem no canal armadilha; revisar incidente').then(()=>true,()=>false);if(ok)acao+='; expulso';}
+      if(c.acao==='banir'&&m.member.bannable){const ok=await m.member.ban({reason:'Mensagem no canal armadilha; revisar incidente'}).then(()=>true,()=>false);if(ok)acao+='; banido';}
+    }
+    const texto=`Usuário ${m.author.id}; canal ${m.channelId}; sinais: ${r.motivos.join(', ')}; score ${r.score}; ação ${acao}. Revisão humana necessária.`;
+    await incidente(m.guild,'Anti-Selfbot',texto);
+    if(c.logs&&c.logs!==store.obter(m.guild.id).config.logs)try{const ch=await m.guild.channels.fetch(c.logs);if(ch?.type===ChannelType.GuildText)await ch.send({embeds:[new EmbedBuilder().setColor(cor(m.guild.id)).setTitle('Anti-Selfbot • ocorrência').setDescription(safe(texto,3000))],allowedMentions:{parse:[]}});}catch{}
+  })().catch(()=>console.warn('Falha no Anti-Selfbot.'));});
   bot.on(Events.GuildAuditLogEntryCreate,(a,g)=>{void auditoria(a,g).catch(()=>console.error('Falha ao processar proteção staff.'));});
   function loja(g:string):any{const arq=join(dataDir,'vendas.json');return existsSync(arq)?JSON.parse(readFileSync(arq,'utf8'))[g]:undefined;}
   function riscos(g:string,id:string,tipo:string){
@@ -75,7 +99,7 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
     const parts=i.customId.split(':'),tipo=parts[0]==='lx'&&parts[1]==='aprovarrecarga'?'recarga':parts[0]==='sv'&&parts[1]==='aprovar'?'pedido':null;
     if(!tipo||!store.obter(i.guildId).config.fraude)return false;
     // Let existing commerce authorization reject users without granting access to risk data.
-    const admin=i.memberPermissions?.has(P.Administrator)??false;
+    const admin=podeConfigurar(i);
     if(!admin){const cargo=loja(i.guildId)?.config?.ticketSuporte;if(tipo!=='pedido'||!cargo||!(await i.guild!.members.fetch({user:i.user.id,force:true})).roles.cache.has(cargo))return false;}
     const r=riscos(i.guildId,parts[2]!,tipo);if(r.o.estado!=='pendente'||!r.motivos.length)return false;
     const key=tipo+':'+r.o.id,revisao=store.obter(i.guildId).revisoes[key];
@@ -86,16 +110,18 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
   function painel(g:string){const c=store.obter(g).config;return tela(g,'Segurança • Configurações',[
     'Ative cada proteção conforme a necessidade do servidor.',
     linha(`**Anti-Raid:** ${c.raid?(c.conter?'alerta e timeout nas entradas':'somente alertas'):'desativado'}. Detecta várias entradas em pouco tempo.`),
+    linha(`**Anti-Selfbot:** ${c.armadilha.ativa?'ativo':'desativado'}. Canal armadilha e sinais de automação.`),
     linha(`**Cargos staff:** ${c.staff?'ativo':'desativado'}. Desfaz concessões não autorizadas aos cargos selecionados, dentro das permissões do bot.`),
     linha(`**Pagamentos:** ${c.fraude?'conferência adicional ativa':'desativado'}. Sinais de risco não confirmam fraude nem consultam bancos.`),
     linha(`**OAuth2 e Verificação:** ${oauth.pronto()?'disponível':'aguardando configuração da programadora'}. Liberação de canais e recuperação consentida.`),
     linha(`**Backups:** ${c.backupHoras?'a cada '+c.backupHoras+' horas':'sob demanda'}. Mantém as últimas 7 cópias locais.`),
     linha(`**Canal de alertas:** ${c.logs?'<#'+c.logs+'>':'não configurado'}.`),
   ].join('\n\n'),[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('sec:menu').setPlaceholder('Escolha uma proteção').addOptions([
-    {label:'Anti-Raid',value:'raid',emoji:ic('moderacao')},{label:'Proteção de cargos staff',value:'staff',emoji:ic('equipe')},{label:'Conferência de pagamentos',value:'fraude',emoji:ic('pagamentos')},{label:'OAuth2 e Verificação',value:'oauth',emoji:ic('permissoes')},{label:'Backups do servidor',value:'backup',emoji:ic('historico')},{label:'Canal de alertas',value:'logs',emoji:ic('logs')},{label:'Incidentes e diagnóstico',value:'diagnostico',emoji:ic('configuracoes')},
+    {label:'Anti-Raid',value:'raid',emoji:ic('moderacao')},{label:'Anti-Selfbot',value:'armadilha',emoji:ic('moderacao')},{label:'Proteção de cargos staff',value:'staff',emoji:ic('equipe')},{label:'Conferência de pagamentos',value:'fraude',emoji:ic('pagamentos')},{label:'OAuth2 e Verificação',value:'oauth',emoji:ic('permissoes')},{label:'Backups do servidor',value:'backup',emoji:ic('historico')},{label:'Canal de alertas',value:'logs',emoji:ic('logs')},{label:'Incidentes e diagnóstico',value:'diagnostico',emoji:ic('configuracoes')},
   ])),row(btn('close','Fechar configurações','fechar'))]);}
   async function pagina(g:Guild,opcao:string){
     const c=store.obter(g.id).config;
+    if(opcao==='armadilha'){const a=c.armadilha;return tela(g.id,'Anti-Selfbot',`${linha(`**Estado:** ${a.ativa?'ativo':'desativado'} • ${a.modo} • ação: ${a.acao} • limiar: ${a.limiar}.`)}\n${linha(`**Canal armadilha:** ${a.canal?'<#'+a.canal+'>':'não escolhido'}.`)}\n${linha(`**Canal de logs:** ${a.logs?'<#'+a.logs+'>':'não escolhido'}.`)}\n${linha(`**Exceções:** ${a.excecoesUsuarios.length} usuários, ${a.excecoesCargos.length} cargos; dono, administradores e bots também são ignorados.`)}\n${linha('Sinais: canal armadilha, rajadas, repetições entre canais e links repetidos. O score expira após 1 minuto. Punição automática só ocorre no canal armadilha após confirmação; outros sinais geram revisão humana.')}\n${linha('A análise de texto exige a intenção Conteúdo da mensagem habilitada para este bot.')}`,[new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(new ChannelSelectMenuBuilder().setCustomId('sec:armcanal').setPlaceholder('Escolher canal armadilha').setChannelTypes(ChannelType.GuildText)),new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(new ChannelSelectMenuBuilder().setCustomId('sec:armlogs').setPlaceholder('Canal privado de logs').setChannelTypes(ChannelType.GuildText)),row(btn('armon','Ativar alertas','confirmar'),btn('armoff','Desativar','fechar'),btn('armmodo','Alternar modo','configuracoes')),row(btn('armaviso','Editar aviso','configuracoes'),btn('armpublicar','Publicar aviso','eventos'),btn('armformato','Texto / embed','configuracoes')),row(btn('armacao','Alterar ação','moderacao'),btn('armlimiar','Ajustar limiar','configuracoes'),btn('armexcecoes','Exceções','permissoes'),btn('home','Voltar','voltar'))]);}
     if(opcao==='raid')return tela(g.id,'Anti-Raid',`${linha(`**Estado:** ${c.raid?'ativo':'desativado'}. Limite de ${c.limite} entradas em ${c.janela} segundos.`)}\n${linha('**Somente alertas:** avisa a equipe sem punir membros.')}\n${linha('**Contenção:** aplica timeout de 10 minutos às novas entradas durante 2 minutos após o limite. Não bane nem expulsa.')}\n${linha('O bot precisa estar online e ter Moderar membros e cargo acima dos membros. Contenção é temporária e pode afetar entradas legítimas.')}`,[row(btn('raid:on','Ativar alertas','confirmar'),btn('raid:off','Desativar','fechar'),btn('raid:limites','Ajustar limite','configuracoes')),row(btn('raid:conter','Ativar contenção','moderacao'),btn('raid:alertar','Usar só alertas','eventos')),back()]);
     if(opcao==='staff')return tela(g.id,'Proteção de cargos staff',`${linha(`**Estado:** ${c.staff?'ativo':'desativado'}. Cargos: ${c.cargos.length?c.cargos.map(id=>'<@&'+id+'>').join(', '):'nenhum'}.`)}\n${linha('Somente o dono, este bot e usuários explicitamente confiáveis podem conceder cargos protegidos.')}\n${linha('Concessões por outros administradores e por outros bots também são revertidas. Autorize esses responsáveis antes de ativar.')}\n${linha('Exige Ver registro de auditoria, Gerenciar cargos e cargo do bot acima dos cargos protegidos. Não impede ações do dono ou ataques enquanto o bot estiver offline.')}`,[new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId('sec:staffroles').setPlaceholder('Selecione os cargos staff protegidos').setMinValues(0).setMaxValues(10).setDefaultRoles(...c.cargos)),new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(new UserSelectMenuBuilder().setCustomId('sec:trusted').setPlaceholder('Usuários que podem conceder cargos staff').setMinValues(0).setMaxValues(10).setDefaultUsers(...c.confiaveis)),row(btn('staff:on','Ativar proteção','confirmar'),btn('staff:off','Desativar','fechar')),back()]);
     if(opcao==='fraude')return tela(g.id,'Pagamentos • Conferência de risco',`${linha(`**Estado:** ${c.fraude?'ativo':'desativado'}. Limite de R$ ${(c.valor/100).toFixed(2)}, conta com menos de ${c.dias} dias ou ${c.tentativas} solicitações em 10 minutos.`)}\n${linha('Pedidos e recargas suspeitos exigem um administrador registrar a conferência antes da aprovação manual. Não altera compras com saldo interno.')}\n${linha('Sinais são indicativos, não acusação de fraude. Não consulta CPF, banco, MED ou titular de Pix.')}\n${linha('O resumo de evidências reúne pedido, datas e registros de entrega. Não garante defesa de MED, ressarcimento ou ausência de fraude.')}`,[row(btn('fraude:on','Ativar conferência','confirmar'),btn('fraude:off','Desativar','fechar'),btn('fraude:limites','Ajustar critérios','configuracoes')),row(btn('evidencia','Resumo de evidências','historico')),back()]);
@@ -185,11 +211,15 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
         if(i.isChatInputCommand()&&i.commandName==='revokeauth'){await oauth.revogar(g.id,i.user.id);await enviar(i,{content:e('sucesso')+' Autorização local apagada. Você também pode revogar o aplicativo nas configurações do Discord.'});return true;}
         const v=store.obter(g.id).config.verificacao;const acesso=v.ativo?' Ao concluir, você receberá o cargo de acesso aos canais protegidos.':' Nenhum cargo de acesso será entregue neste modo.';const url=oauth.emitir(g.id,i.user.id);await enviar(i,tela(g.id,'Autorizar recuperação voluntária',`Ao autorizar, você permite que o dono o readicione **somente ao servidor ${safe(g.name,100)}**, caso você saia. ${acesso} Você pode cancelar a autorização; no modo de acesso, os canais permanecem bloqueados até verificar. /revokeauth apaga o consentimento de recuperação, sem remover o cargo já recebido.`,[row(new ButtonBuilder().setLabel('Autorizar no Discord').setStyle(ButtonStyle.Link).setURL(url))]));return true;
       }
-      if(!i.memberPermissions?.has(P.Administrator))throw Error('Apenas administradores podem configurar a segurança.');
+      if(!podeConfigurar(i))throw Error('Apenas administradores podem configurar a segurança.');
       const [,acao,key,extra]=custom.split(':');
-      const dono=['staffroles','trusted','staff','verifyrole','verifychannel','verifycreate','verifyplan','verifyoff'].includes(acao??'')||i.isChatInputCommand()&&i.commandName==='restoremember'||acao==='confirm';
+      if(acao?.startsWith('arm')&&i.user.id!==g.ownerId&&!acessoCompleto(i))throw Error('Somente o dono ou alguém com acesso completo pode configurar o Anti-Selfbot.');
+      const dono=['staffroles','trusted','staff'].includes(acao??'')||i.isChatInputCommand()&&i.commandName==='restoremember'||acao==='confirm';
       if(dono&&i.user.id!==g.ownerId)throw Error('Somente o dono do servidor pode alterar a confiança staff ou executar recuperações.');
+      if(['verifyrole','verifychannel','verifycreate','verifyplan','verifyoff'].includes(acao??'')&&i.user.id!==g.ownerId&&!acessoCompleto(i))throw Error('Somente o dono ou alguém com acesso completo pode configurar a verificação.');
       // Modals must be opened before acknowledging the interaction.
+      if(acao==='armaviso'&&i.isButton()){const x=store.obter(g.id).config.armadilha;const f=field('aviso','Aviso no canal armadilha',x.aviso,1000);f.components[0]!.setStyle(TextInputStyle.Paragraph);await i.showModal(new ModalBuilder().setCustomId('sec:armsalvaraviso').setTitle('Aviso Anti-Selfbot').addComponents(f));return true;}
+      if(acao==='armlimiar'&&i.isButton()){await i.showModal(new ModalBuilder().setCustomId('sec:armsalvarlimiar').setTitle('Limiar de suspeita').addComponents(field('limiar','Pontuação mínima (2 a 10)',String(store.obter(g.id).config.armadilha.limiar),2)));return true;}
       if(i.isButton()&&acao==='editverify'){
         const m=store.obter(g.id).config.mensagemVerificacao;
         const texto=field('texto','Mensagem que os usuários vão ler',m.texto,2600);texto.components[0]!.setStyle(TextInputStyle.Paragraph);
@@ -208,7 +238,7 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
         await i.showModal(new ModalBuilder().setCustomId(`sec:salvarrevisao:${key}:${extra}`).setTitle('Conferência manual no banco').addComponents(field('motivo','Como você conferiu o crédito no banco?','',500)));return true;
       }
       if(i.isChatInputCommand())await i.deferReply({flags:MessageFlags.Ephemeral});else if(i.isMessageComponent())await i.deferUpdate();else if(i.isModalSubmit())await i.deferReply({flags:MessageFlags.Ephemeral});
-      if(entradaUI){await i.followUp({...painel(g.id),flags:MessageFlags.Ephemeral});return true;}
+      if(entradaUI){await enviar(i,painel(g.id));return true;}
       if(i.isChatInputCommand()&&i.commandName==='restoremember'){
         const id=i.options.getString('user_id',true);if(!/^\d{17,20}$/.test(id))throw Error('ID inválido.');
         if(!oauth.pronto())throw Error('OAuth2 indisponível; falta configurar o serviço.');
@@ -218,6 +248,34 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
       if(i.isChatInputCommand()||acao==='home'){await enviar(i,painel(g.id));return true;}
       if(acao==='close'){await enviar(i,{content:e('fechar')+' Configurações de segurança fechadas.',embeds:[],components:[]});return true;}
       if(i.isStringSelectMenu()&&acao==='menu'){await enviar(i,await pagina(g,i.values[0]!));return true;}
+      if(acao?.startsWith('arm')){
+        const a=store.obter(g.id).config.armadilha;
+        if(acao==='armexcecoes'){await enviar(i,tela(g.id,'Anti-Selfbot • exceções','Usuários e cargos selecionados são ignorados. Bots e dono também são ignorados.',[new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(new UserSelectMenuBuilder().setCustomId('sec:armusuarios').setPlaceholder('Usuários de exceção').setMinValues(0).setMaxValues(10).setDefaultUsers(...a.excecoesUsuarios)),new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId('sec:armcargos').setPlaceholder('Cargos de exceção').setMinValues(0).setMaxValues(10).setDefaultRoles(...a.excecoesCargos)),row(btn('armvoltar','Voltar à armadilha'))]));return true;}
+        if(acao==='armvoltar'){await enviar(i,await pagina(g,'armadilha'));return true;}
+        if(acao==='armcanal'&&i.isChannelSelectMenu()){const ch=await g.channels.fetch(i.values[0]!);if(!ch||ch.type!==ChannelType.GuildText)throw Error('Escolha um canal de texto.');a.canal=ch.id;}
+        else if(acao==='armlogs'&&i.isChannelSelectMenu()){const ch=await g.channels.fetch(i.values[0]!);const me=await g.members.fetchMe();if(!ch||ch.type!==ChannelType.GuildText||ch.permissionsFor(g.roles.everyone)?.has(P.ViewChannel)||!ch.permissionsFor(me)?.has([P.ViewChannel,P.SendMessages,P.EmbedLinks]))throw Error('Escolha um canal privado acessível ao bot.');a.logs=ch.id;}
+        else if(acao==='armusuarios'&&i.isUserSelectMenu())a.excecoesUsuarios=[...i.values];
+        else if(acao==='armcargos'&&i.isRoleSelectMenu())a.excecoesCargos=[...i.values];
+        else if(acao==='armon'){if(!a.canal)throw Error('Escolha primeiro o canal armadilha.');a.ativa=true;a.acao='alertar';}
+        else if(acao==='armoff')a.ativa=false;
+        else if(acao==='armmodo')a.modo=a.modo==='simples'?'inteligente':'simples';
+        else if(acao==='armacao'){await enviar(i,tela(g.id,'Ação no canal armadilha','Escolha a ação. Expulsão e banimento exigem confirmação adicional. Nenhuma ação é aplicada por pontuação fora do canal armadilha.',[row(btn('armdefinir:alertar','Só alertar'),btn('armdefinir:apagar','Apagar'),btn('armdefinir:timeout','Timeout')),row(btn('armdefinir:expulsar','Expulsar'),btn('armdefinir:banir','Banir')),row(btn('armvoltar','Voltar'))]));return true;}
+        else if(acao==='armdefinir'&&i.isButton()){
+          if(!['alertar','apagar','timeout','expulsar','banir'].includes(key??''))throw Error('Ação inválida.');
+          if(['timeout','expulsar','banir'].includes(key!)){const token=randomBytes(12).toString('hex');confirmacoesArmadilha.set(token,{g:g.id,u:i.user.id,acao:key as 'timeout'|'expulsar'|'banir',vence:Date.now()+120000});await enviar(i,tela(g.id,'Confirmar ação automática',`Ação **${key}** será aplicada a mensagens no canal armadilha após o limiar. Confirme somente após revisar o canal e as exceções.`,[row(btn('armconfirmar:'+token,'Confirmar ação'),btn('armvoltar','Cancelar'))]));return true;}
+          a.acao=key as 'alertar'|'apagar';
+        }
+        else if(acao==='armconfirmar'&&i.isButton()){const p=confirmacoesArmadilha.get(key!);if(!p||p.g!==g.id||p.u!==i.user.id||p.vence<Date.now())throw Error('Confirmação expirada.');confirmacoesArmadilha.delete(key!);a.acao=p.acao;}
+        else if(acao==='armformato')a.avisoEmbed=!a.avisoEmbed;
+        else if(acao==='armpublicar'){
+          if(!a.canal)throw Error('Escolha o canal armadilha.');const ch=await g.channels.fetch(a.canal);if(ch?.type!==ChannelType.GuildText)throw Error('Canal indisponível.');
+          const conteudo=safe(a.aviso,1000);await ch.send(a.avisoEmbed?{embeds:[new EmbedBuilder().setColor(cor(g.id)).setDescription(conteudo)],allowedMentions:{parse:[]}}:{content:conteudo,allowedMentions:{parse:[]}});
+        }
+        else if(acao==='armsalvaraviso'&&i.isModalSubmit())a.aviso=i.fields.getTextInputValue('aviso').trim().slice(0,1000);
+        else if(acao==='armsalvarlimiar'&&i.isModalSubmit()){const n=Number(i.fields.getTextInputValue('limiar'));if(!Number.isInteger(n)||n<2||n>10)throw Error('Escolha 2 a 10 pontos.');a.limiar=n;}
+        else throw Error('Opção Anti-Selfbot inválida.');
+        store.configurar(g.id,{armadilha:a});await enviar(i,await pagina(g,'armadilha'));return true;
+      }
       if(acao==='oauthhome'){await enviar(i,painelVerificacao(g));return true;}
       if(acao==='oauthmenu'&&i.isStringSelectMenu()){
         const opcao=i.values[0];
@@ -333,7 +391,7 @@ export function instalarSeguranca(bot:Client,cor:(g:string|null)=>number,store:S
     for(const [id,t]of auditoriasVistas)if(t<Date.now()-300000)auditoriasVistas.delete(id);
   }
   bot.once(Events.ClientReady,()=>{void oauth.iniciar().catch(()=>console.error('OAuth2 não iniciou. Confira endereço e porta.'));void tick();});
-  const timer=setInterval(()=>{void tick();},60000);timer.unref();
+  const timer=intervaloBot(()=>{void tick();},60000);timer.unref();
   return{tratar,entrada,auditoria,tick,backups,oauth,verificacao,parar:()=>{clearInterval(timer);oauth.parar();}};
 }
 

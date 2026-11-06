@@ -1,8 +1,9 @@
+import {arquivoDados} from './contexto-bot.js';
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomBytes,createHash} from 'node:crypto';
-export type Agendamento={id:string;tipo:'aviso'|'produto';produto:string|null;canal:string|null;titulo:string;texto:string;imagem:string;quando:number;intervalo:number;estado:'rascunho'|'ativo'|'pausado'|'concluido'|'erro'|'executando';versao:number;criado:number;ator:string;erro:string;tentativa:{quando:number;nonce:string}|null;historico:{quando:number;mensagem:string;resultado:string}[]};
+export type Agendamento={limpezaEstoque?:string[];estoqueDinamico?:boolean;assinaturaEstoque?:string;linkEstoque?:string;id:string;tipo:'aviso'|'produto';produto:string|null;canal:string|null;titulo:string;texto:string;imagem:string;quando:number;intervalo:number;estado:'rascunho'|'ativo'|'pausado'|'concluido'|'erro'|'executando';versao:number;criado:number;ator:string;erro:string;tentativa:{quando:number;nonce:string}|null;historico:{quando:number;mensagem:string;resultado:string}[]};
 export function dataAgendada(s:string,agora=Date.now()){
  if(!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s))throw Error('Use AAAA-MM-DD HH:mm, no horário de São Paulo.');
  const n=Date.parse(s.replace(' ','T')+':00-03:00');if(!Number.isFinite(n)||new Date(n-10800000).toISOString().slice(0,16).replace('T',' ')!==s)throw Error('Data ou horário inexistente.');
@@ -13,7 +14,7 @@ export function intervaloAgendado(s:string,tipo:'aviso'|'produto'){
  if(n!==0&&(n<min||n>10080))throw Error(`Intervalo: 0 (uma vez) ou de ${min} a 10080 minutos.`);return n;
 }
 export function proximaExecucao(quando:number,intervalo:number,agora=Date.now()){return intervalo?quando+(Math.floor(Math.max(0,agora-quando)/(intervalo*60000))+1)*intervalo*60000:quando;}
-export function criarStoreAgendamentos(arquivo=fileURLToPath(new URL('../../data/agendamentos-loja.json',import.meta.url))){
+export function criarStoreAgendamentos(arquivo=arquivoDados('agendamentos-loja.json')){
  let dados:Record<string,Record<string,Agendamento>>=existsSync(arquivo)?JSON.parse(readFileSync(arquivo,'utf8')):{};
  const obter=(g:string)=>structuredClone(dados[g]??{});
  function alterar<T>(g:string,fn:(d:Record<string,Agendamento>)=>T){const d=obter(g),r=fn(d),novos={...dados,[g]:d};mkdirSync(dirname(arquivo),{recursive:true});writeFileSync(arquivo+'.tmp',JSON.stringify(novos,null,2));renameSync(arquivo+'.tmp',arquivo);dados=novos;return structuredClone(r);}

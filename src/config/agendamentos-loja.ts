@@ -1,3 +1,5 @@
+import {podeConfigurar} from './acessos.js';
+import {intervaloBot} from './contexto-bot.js';
 import {ActionRowBuilder,ButtonBuilder,ButtonStyle,ChannelSelectMenuBuilder,ChannelType,ContainerBuilder,EmbedBuilder,Events,MessageFlags,ModalBuilder,PermissionFlagsBits as P,SeparatorBuilder,StringSelectMenuBuilder,TextDisplayBuilder,TextInputBuilder,TextInputStyle,escapeMarkdown,type Client,type Guild,type Interaction} from 'discord.js';
 import {emojiTexto as e,emojiComponente as ic} from './emojis.js';
 import {criarStoreAgendamentos,dataAgendada,intervaloAgendado,type Agendamento} from './agendamentos-store.js';
@@ -13,8 +15,18 @@ export function instalarAgendamentos(bot:Client,cor:(g:string|null)=>number,vend
  const back=()=>row(btn('home','Avisos e anúncios','agendamento'),new ButtonBuilder().setCustomId('sv:painel').setLabel('Voltar à loja').setEmoji(ic('loja')).setStyle(ButtonStyle.Secondary));
  const view=(g:string,t:string,d:string,rows:ActionRowBuilder<any>[]=[back()])=>({components:[new ContainerBuilder().setAccentColor(cor(g)).addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${e('agendamento')} ${t}\n${d}`)).addSeparatorComponents(new SeparatorBuilder()).addActionRowComponents(...rows)],flags:MessageFlags.IsComponentsV2 as const,content:null,embeds:[],allowedMentions:{parse:[] as never[]}});
  const atualizar=async(i:any,p:any)=>{if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,flags:(p.flags??0)|MessageFlags.Ephemeral});};
+ const assinaturaEstoque=(g:string,j:Agendamento)=>{const p=j.produto?vendas.obter(g).produtos[j.produto]:null;return JSON.stringify(p?[p.id,p.nome,p.ativo,p.estoque,p.variacoes.map(v=>[v.id,v.nome,v.estoque])]:null);};
  const ocupados=new Set<string>();
  async function canal(g:Guild,id:string|null){if(!id)throw Error('Selecione um canal destinatário.');const ch=await g.channels.fetch(id),me=await g.members.fetchMe();if(!ch||ch.type!==ChannelType.GuildText||!ch.permissionsFor(me)?.has([P.ViewChannel,P.SendMessages,P.EmbedLinks,P.ReadMessageHistory]))throw Error('O bot precisa visualizar, enviar mensagens, inserir links e ler o histórico do canal de texto.');return ch;}
+ async function limparEstoque(g:Guild,id:string){
+  const j=store.obter(g.id)[id];if(!j?.estoqueDinamico||!j.limpezaEstoque?.length||!j.canal)return;const ch=await canal(g,j.canal),removidas=new Set<string>();
+  for(const mid of j.limpezaEstoque){try{const msg=await ch.messages.fetch(mid);if(msg.author.id===bot.user?.id&&msg.embeds.some(em=>em.footer?.text?.startsWith('Anzy Programs • Automação ')))await msg.delete();removidas.add(mid);}catch(err){if((err as any).code===10008)removidas.add(mid);}}
+  if(removidas.size&&store.obter(g.id)[id])store.mudar(g.id,id,x=>{x.limpezaEstoque=(x.limpezaEstoque??[]).filter(mid=>!removidas.has(mid));});
+ }
+ async function finalizar(g:Guild,j:Agendamento,mensagem:string,agora:number){
+  if(j.estoqueDinamico)store.mudar(g.id,j.id,x=>{x.limpezaEstoque=[...new Set([...(x.limpezaEstoque??[]),...(x.historico.at(-1)?.mensagem?[x.historico.at(-1)!.mensagem]:[])])].filter(mid=>mid&&mid!==mensagem);});
+  store.finalizar(g.id,j.id,mensagem,agora);if(j.estoqueDinamico)await limparEstoque(g,j.id).catch(()=>{});
+ }
  async function executar(g:Guild,id:string,agora=Date.now()){
   const lock=g.id+':'+id;if(ocupados.has(lock))return;ocupados.add(lock);
   try{
@@ -26,19 +38,21 @@ export function instalarAgendamentos(bot:Client,cor:(g:string|null)=>number,vend
    if(recuperacao){
     const mensagens=await ch.messages.fetch({limit:100});
     const encontrada=mensagens.find(m=>m.author.id===bot.user?.id&&m.embeds.some(em=>em.footer?.text===marcadorAgendado(nonce)));
-    if(encontrada){if(j.tipo==='produto')vendas.publicar(g.id,j.produto!,ch.id,encontrada.id);store.finalizar(g.id,id,encontrada.id,agora);return;}
+    if(encontrada){if(j.tipo==='produto')vendas.publicar(g.id,j.produto!,ch.id,encontrada.id);await finalizar(g,j,encontrada.id,agora);return;}
     throw Error('Tentativa anterior interrompida; não foi possível confirmar o envio. Confira as últimas mensagens antes de reagendar, para evitar duplicação.');
    }
-   let mensagem='';
+   let mensagem='',assinaturaAtual:string|undefined;
    if(j.tipo==='aviso'){
-    const embed=new EmbedBuilder().setColor(cor(g.id)).setTitle(e('eventos')+' '+j.titulo).setDescription(j.texto).setFooter({text:marcadorAgendado(nonce)});if(j.imagem)embed.setImage(j.imagem);
-    const m=await ch.send({embeds:[embed],nonce,enforceNonce:true,allowedMentions:{parse:[]}});mensagem=m.id;
+    let descricao=j.texto;
+    if(j.estoqueDinamico){const p=j.produto?vendas.obter(g.id).produtos[j.produto]:null;if(!p)throw Error('Produto do aviso de estoque foi removido.');assinaturaAtual=assinaturaEstoque(g.id,j);const total=p.variacoes.length?p.variacoes.reduce((n,v)=>n+v.estoque,0):p.estoque;descricao=descricao.replaceAll('{produto}',()=>seguro(p.nome,100)).replaceAll('{estoque}',()=>String(p.ativo?total:0)).replaceAll('{status}',()=>p.ativo&&total>0?'Disponível para compra':'Indisponível no momento').replaceAll('{variacoes}',()=>p.variacoes.map(v=>seguro(v.nome,80)+': '+v.estoque).join('\n'));}
+    const embed=new EmbedBuilder().setColor(cor(g.id)).setTitle(e('eventos')+' '+j.titulo).setDescription(descricao).setFooter({text:marcadorAgendado(nonce)});if(j.imagem)embed.setImage(j.imagem);
+    const link=j.estoqueDinamico&&j.linkEstoque?new URL(j.linkEstoque):null;if(link&&(link.protocol!=='https:'||link.hostname!=='discord.com'))throw Error('Use um link de canal do Discord.');const components=link?[row(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Adquirir meu bot').setEmoji(ic('loja')).setURL(link.href))]:[];if(assinaturaAtual!==undefined)store.mudar(g.id,id,x=>{x.assinaturaEstoque=assinaturaAtual!;});const m=await ch.send({embeds:[embed],components,nonce,enforceNonce:true,allowedMentions:{parse:[]}});mensagem=m.id;
    }else{
     const p=j.produto?vendas.obter(g.id).produtos[j.produto]:null;if(!p||!p.ativo)throw Error('Produto removido ou pausado. Ative o produto antes de republicar.');
     await publicar(g,p.id,ch.id,nonce);mensagem=vendas.obter(g.id).produtos[p.id]?.publicacoes.find(x=>x.canal===ch.id)?.mensagem??'';
     if(!mensagem)throw Error('Confira o anúncio antes de reagendar: não foi possível confirmar o vínculo da publicação.');
    }
-   store.finalizar(g.id,id,mensagem,agora);
+   await finalizar(g,j,mensagem,agora);
   }catch(err){try{store.falhar(g.id,id,err instanceof Error?err.message:'Falha no envio. Confira o canal e reagende.');}catch{console.error('Não foi possível salvar o resultado da automação.');}}
   finally{ocupados.delete(lock);}
  }
@@ -47,10 +61,10 @@ export function instalarAgendamentos(bot:Client,cor:(g:string|null)=>number,vend
   if(!bot.isReady?.())return;
   for(const gid of store.ids()){
    if(rodando.has(gid))continue;const guild=bot.guilds.cache.get(gid);if(!guild)continue;rodando.add(gid);
-   try{for(const j of Object.values(store.obter(gid)))if(j.estado==='executando'||j.estado==='ativo'&&j.quando<=agora)await executar(guild,j.id,agora);}finally{rodando.delete(gid);}
+   try{for(let j of Object.values(store.obter(gid))){if(j.limpezaEstoque?.length)await limparEstoque(guild,j.id).catch(()=>{});if(j.estado==='ativo'&&j.estoqueDinamico&&j.assinaturaEstoque!==assinaturaEstoque(gid,j))j=store.mudar(gid,j.id,x=>{x.quando=agora;});if(j.estado==='executando'||j.estado==='ativo'&&j.quando<=agora)await executar(guild,j.id,agora);}}finally{rodando.delete(gid);}
   }
  }
- const timer=setInterval(()=>{void tick().catch(()=>console.error('Falha na rotina de avisos da loja.'));},30000);timer.unref();
+ const timer=intervaloBot(()=>{void tick().catch(()=>console.error('Falha na rotina de avisos da loja.'));},30000);timer.unref();
  bot.once?.(Events.ClientReady,()=>{void tick().catch(()=>console.error('Falha ao iniciar avisos da loja.'));});
  function home(g:string){const all=Object.values(store.obter(g));return view(g,'Avisos, lembretes e anúncios',`${e('voltar')} **Agendar aviso:** escreva uma mensagem e escolha o canal e o horário. Pode enviar uma vez ou repetir.\n${e('voltar')} **Republicar anúncio:** atualiza o preço e estoque da vitrine; se a mensagem foi apagada, cria outra. Não apaga anúncios existentes nem promete proteção contra denúncias.\n${e('voltar')} **Horários:** São Paulo. O bot precisa estar online; a conferência ocorre a cada 30 segundos.\n\n**Ativos:** ${all.filter(j=>j.estado==='ativo').length} · **Precisam de atenção:** ${all.filter(j=>j.estado==='erro').length}\nEnvios perdidos durante uma queda não são acumulados. Menções não notificam @everyone ou cargos.`,[row(btn('novoaviso','Agendar aviso / lembrete','eventos'),btn('produtos:0','Republicar anúncio','produtos')),row(btn('lista:0','Gerenciar agendamentos','historico')),back()]);}
  function formulario(j?:Agendamento,produto?:string){
@@ -72,7 +86,7 @@ export function instalarAgendamentos(bot:Client,cor:(g:string|null)=>number,vend
   }
   rows.push(row(btn('ver:'+j.id,'Atualizar situação','historico')),back());
   const link=j.historico.at(-1)?.mensagem;
-  return view(g,j.tipo==='aviso'?'Aviso • '+seguro(j.titulo,80):'Republicação • '+seguro(j.titulo,80),`**Situação:** ${estado}\n**Canal:** ${j.canal?'<#'+j.canal+'>':'selecione abaixo'}\n**Horário:** <t:${Math.floor(j.quando/1000)}:F> (São Paulo)\n**Repetição:** ${j.intervalo?'a cada '+j.intervalo+' minutos':'uma vez'}\n${j.tipo==='aviso'?'\n**Mensagem:**\n'+seguro(j.texto,1600):'\nAtualiza a mensagem existente ou recupera uma vitrine apagada, usando o produto atual.'}${j.erro?'\n\n'+e('aviso')+' '+seguro(j.erro,400):''}\n\n**Execuções confirmadas no histórico recente:** ${j.historico.length}${link?'\n[Ver última publicação](https://discord.com/channels/'+g+'/'+j.canal+'/'+link+')':''}\n\nEditar pausa o envio até uma nova confirmação. Para reagendar após erro, confira antes se a mensagem já foi enviada.`,rows);
+  return view(g,j.tipo==='aviso'?'Aviso • '+seguro(j.titulo,80):'Republicação • '+seguro(j.titulo,80),`**Situação:** ${estado}\n**Canal:** ${j.canal?'<#'+j.canal+'>':'selecione abaixo'}\n**Horário:** <t:${Math.floor(j.quando/1000)}:F> (São Paulo)\n**Atualização por estoque:** ${j.estoqueDinamico?'automática quando a quantidade mudar':'não'}\n**Repetição:** ${j.intervalo?'a cada '+j.intervalo+' minutos':'uma vez'}\n${j.tipo==='aviso'?'\n**Mensagem:**\n'+seguro(j.texto,1600):'\nAtualiza a mensagem existente ou recupera uma vitrine apagada, usando o produto atual.'}${j.erro?'\n\n'+e('aviso')+' '+seguro(j.erro,400):''}\n\n**Execuções confirmadas no histórico recente:** ${j.historico.length}${link?'\n[Ver última publicação](https://discord.com/channels/'+g+'/'+j.canal+'/'+link+')':''}\n\nEditar pausa o envio até uma nova confirmação. Para reagendar após erro, confira antes se a mensagem já foi enviada.`,rows);
  }
  function produtos(g:string,pg=0){const todos=Object.values(vendas.obter(g).produtos).filter(p=>p.ativo),pag=Math.max(0,Math.min(pg,Math.max(0,Math.ceil(todos.length/20)-1))),lista=todos.slice(pag*20,pag*20+20);const rows:ActionRowBuilder<any>[]=[];
   if(lista.length)rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('au:produto').setPlaceholder('Escolha um produto ativo').addOptions(lista.map(p=>({label:p.nome.slice(0,100),value:p.id,emoji:ic('produtos')})))));
@@ -86,7 +100,7 @@ export function instalarAgendamentos(bot:Client,cor:(g:string|null)=>number,vend
   const custom='customId'in i?i.customId:'',entrada=i.isStringSelectMenu()&&custom==='sv:menu'&&i.values[0]==='agendamentos';if(!entrada&&!custom.startsWith('au:'))return false;
   try{
    if(!i.inGuild()||!i.guild||!i.isRepliable())throw Error('Use dentro do servidor.');
-   if(!i.memberPermissions?.has(P.Administrator))throw Error('Somente administradores gerenciam avisos e anúncios agendados.');
+   if(!podeConfigurar(i))throw Error('Somente administradores gerenciam avisos e anúncios agendados.');
    const g=i.guild,[,acao,id,versao]=custom.split(':'),j=id?store.obter(g.id)[id]:undefined;
    if(i.isButton()&&acao==='novoaviso'){await i.showModal(formulario());return true;}
    if(i.isButton()&&acao==='editar'){

@@ -1,3 +1,5 @@
+import {podeConfigurar} from './acessos.js';
+import {arquivoDados} from './contexto-bot.js';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,11 +7,11 @@ import { emojiTexto } from './emojis.js';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, ContainerBuilder, RoleSelectMenuBuilder, EmbedBuilder, Events, MessageFlags, ModalBuilder, PermissionFlagsBits, TextDisplayBuilder, TextInputBuilder, TextInputStyle, type Client, type Interaction } from 'discord.js';
 
 type Config = { autoRole: string | null; imagemBoas: string; imagemSaida: string; boas: string | null; saida: string | null; logs: string | null; avisos: string | null; mensagemBoas: string; mensagemSaida: string; mensagemAviso: string; intervalo: number; ultimoAviso: number };
-const padrao = (): Config => ({ autoRole:null, imagemBoas:'', imagemSaida:'', boas:null, saida:null, logs:null, avisos:null, mensagemBoas:'Bem-vindo(a), {usuario}, ao {servidor}!', mensagemSaida:'{nome} saiu do servidor {servidor}.', mensagemAviso:'Conheça a Anzy Programs: https://discord.gg/Ny2v6wUpJ', intervalo:0, ultimoAviso:0 });
+const padrao = (): Config => ({ autoRole:null, imagemBoas:'', imagemSaida:'', boas:null, saida:null, logs:null, avisos:null, mensagemBoas:'Bem-vindo(a), {usuario}, ao {servidor}!', mensagemSaida:'{nome} saiu do servidor {servidor}.', mensagemAviso:'Conheça a Anzy Programs: https://discord.gg/eAy2XQr7qc', intervalo:0, ultimoAviso:0 });
 const campos = ['boas','saida','avisos'] as const;
 type Campo = typeof campos[number];
 const nomes: Record<Campo,string> = { boas:'Boas-vindas', saida:'Saída', avisos:'Comunicados da Anzy Programs' };
-export function criarStoreOutros(arquivo = fileURLToPath(new URL('../../data/outros.json', import.meta.url))) {
+export function criarStoreOutros(arquivo = arquivoDados('outros.json')) {
   let dados: Record<string, Config> = {};
   if (existsSync(arquivo)) {
     const raw: unknown = JSON.parse(readFileSync(arquivo,'utf8'));
@@ -105,7 +107,7 @@ export function instalarOutros(bot: Client, cor: (id: string | null) => number, 
     const proprio=('customId' in i)&&i.customId.startsWith('outros:');
     if(!escolha&&!proprio)return false;
     if(!i.isRepliable())return false;
-    if(!i.inGuild()||!i.guildId||!i.memberPermissions?.has(PermissionFlagsBits.Administrator)) {await i.reply({content:emojiTexto('erro')+'Apenas administradores podem configurar o bot.',flags:MessageFlags.Ephemeral});return true;}
+    if(!i.inGuild()||!i.guildId||!podeConfigurar(i)) {await i.reply({content:emojiTexto('erro')+'Apenas administradores podem configurar o bot.',flags:MessageFlags.Ephemeral});return true;}
     const id=i.guildId;
     if(escolha&&i.isStringSelectMenu()) {
       const tipo=['avisos','membros','gerais','autorole'][Number(i.values[0])];

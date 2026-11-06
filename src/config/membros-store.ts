@@ -1,3 +1,4 @@
+import {arquivoDados} from './contexto-bot.js';
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -20,7 +21,7 @@ export function identificarConvite(antes:BaseConvites|undefined,depois:BaseConvi
  if(diferencas.length===0&&personalizado===1)return{convidador:null,fonte:'personalizado'};
  return{convidador:null,fonte:'desconhecido'};
 }
-export function criarStoreMembros(arquivo=fileURLToPath(new URL('../../data/membros.json',import.meta.url))){
+export function criarStoreMembros(arquivo=arquivoDados('membros.json')){
  let dados:Record<string,Dados>=existsSync(arquivo)?JSON.parse(readFileSync(arquivo,'utf8')):{};
  const obter=(g:string):Dados=>structuredClone(dados[g]??padrao());
  const perfil=(g:string,u:string):Perfil=>structuredClone(dados[g]?.perfis[u]??perfilPadrao());

@@ -1,3 +1,6 @@
+import {podeConfigurar} from './acessos.js';
+import {painelNaMensagem} from './painel-v2.js';
+import {intervaloBot,timeoutBot} from './contexto-bot.js';
 import {randomInt,randomBytes} from 'node:crypto';
 import {ActionRowBuilder,AttachmentBuilder,ButtonBuilder,ButtonStyle,ChannelSelectMenuBuilder,ChannelType,EmbedBuilder,Events,MessageFlags,PermissionFlagsBits as P,SlashCommandBuilder,StringSelectMenuBuilder,escapeMarkdown,type Client,type Guild,type GuildMember,type Interaction,type Message} from 'discord.js';
 import {emojiTexto as e,emojiComponente as ic} from './emojis.js';
@@ -27,7 +30,7 @@ export function instalarMembros(bot:Client,cor:(g:string|null)=>number,store=cri
  const b=(id:string,label:string,icon:Parameters<typeof ic>[0]='voltar')=>new ButtonBuilder().setCustomId('mb:'+id).setLabel(label).setStyle(ButtonStyle.Secondary).setEmoji(ic(icon));
  const row=(...bs:ButtonBuilder[])=>new ActionRowBuilder<ButtonBuilder>().addComponents(bs);
  const payload=(g:string,t:string,d:string,rows:ActionRowBuilder<any>[]=[])=>( {embeds:[emb(g,t,d)],components:rows,allowedMentions:{parse:[] as never[]}} );
- async function responder(i:any,p:any,privado=false){if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,...privado?{flags:MessageFlags.Ephemeral}:{}});}
+ async function responder(i:any,p:any,privado=false){p=painelNaMensagem(i,p);if(i.deferred||i.replied)await i.editReply(p);else await i.reply({...p,...privado?{flags:MessageFlags.Ephemeral}:{}});}
  const back=()=>row(b('config','Interações, XP e convites','configuracoes'),b('close','Fechar','fechar'));
  function painel(g:string){const c=store.obter(g).config;return payload(g,'Interações, XP e convites',`${e('voltar')} **Comandos:** ${c.grupos.join(', ')||'desativados'}.\n${e('voltar')} **XP:** ${c.xp?'ativo':'desativado'}; 20 pontos por mensagem elegível a cada ${c.cooldown} segundos.\n${e('voltar')} **Aviso de nível:** ${c.canalNivel?'<#'+c.canalNivel+'>':'não configurado'}.\n${e('voltar')} **Convites:** ${c.invites?'acompanhamento ativo':'desativado'}.\n\nEscolha uma seção. Não há enquetes, sugestões ou aniversários.`,[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('mb:configmenu').setPlaceholder('Escolha o que configurar').addOptions([{label:'Grupos de comandos',value:'grupos',emoji:ic('equipe')},{label:'XP e avisos de nível',value:'xp',emoji:ic('eventos')},{label:'Acompanhamento de convites',value:'convites',emoji:ic('historico')},{label:'Ver comandos disponíveis',value:'comandos',emoji:ic('configuracoes')}])),row(b('close','Fechar configurações','fechar'))]);}
  function xpPainel(g:string){const c=store.obter(g).config;return payload(g,'XP • Configurações',`**Estado:** ${c.xp?'ativo':'desativado'}.\n${e('voltar')} Cada mensagem humana elegível vale **20 XP**, com intervalo mínimo de ${c.cooldown} segundos. Bots, webhooks e mensagens de sistema não pontuam.\n${e('voltar')} **Canais que contam XP:** ${c.canaisXP.length?c.canaisXP.map(id=>'<#'+id+'>').join(', '):'todos os canais de texto acessíveis ao bot'}.\n${e('voltar')} **Avisos de nível:** ${c.canalNivel?'<#'+c.canalNivel+'>':'desativados'}.\nO bot não precisa ler nem guardar o conteúdo das mensagens. /profile mostra o cartão e /leaderboard o ranking.`,[row(b('xp:on','Ativar XP','confirmar'),b('xp:off','Desativar XP','fechar')),new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(new ChannelSelectMenuBuilder().setCustomId('mb:xpnotice').setPlaceholder('Canal dos avisos de novo nível').setChannelTypes(ChannelType.GuildText)),new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(new ChannelSelectMenuBuilder().setCustomId('mb:xpchannels').setPlaceholder('Canais que contam XP (vazio = todos)').setChannelTypes(ChannelType.GuildText).setMinValues(0).setMaxValues(10)),new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('mb:xpcooldown').setPlaceholder('Intervalo mínimo de pontuação').addOptions([{label:'1 minuto',value:'60'},{label:'2 minutos',value:'120'},{label:'5 minutos',value:'300'}])),row(b('xpnoticeoff','Desativar avisos de nível','fechar'),b('config','Voltar','voltar'))]);}
@@ -82,7 +85,7 @@ export function instalarMembros(bot:Client,cor:(g:string|null)=>number,store=cri
    for(const m of membros){const entrada=store.entrar(g.id,m.id,m.user.bot?{convidador:null,fonte:'bot'}:origem);await logConvite(g,'Entrada acompanhada',`**Membro:** <@${m.id}>\n**Origem estimada:** ${entrada.convidador?'<@'+entrada.convidador+'>':entrada.fonte==='personalizado'?'link personalizado':'não identificado'}\nReentradas não geram novos pontos.`);}
   }finally{processando.delete(g.id);if(filas.get(g.id)?.length)agendarEntradas(g);}
  }
- function agendarEntradas(g:Guild){if(timers.has(g.id))return;const t=setTimeout(()=>{timers.delete(g.id);void processarEntradas(g).catch(()=>console.warn('Não foi possível acompanhar as entradas.'));},1500);t.unref();timers.set(g.id,t);}
+ function agendarEntradas(g:Guild){if(timers.has(g.id))return;const t=timeoutBot(()=>{timers.delete(g.id);void processarEntradas(g).catch(()=>console.warn('Não foi possível acompanhar as entradas.'));},1500);t.unref();timers.set(g.id,t);}
  function entrada(m:GuildMember){if(!store.obter(m.guild.id).config.invites)return;const fila=filas.get(m.guild.id)??[];if(!fila.some(x=>x.id===m.id))fila.push(m);filas.set(m.guild.id,fila);agendarEntradas(m.guild);}
  bot.on(Events.MessageCreate,m=>{void mensagemXP(m).catch(()=>console.warn('Não foi possível registrar XP.'));});
  bot.on(Events.GuildMemberAdd,entrada);
@@ -136,8 +139,8 @@ export function instalarMembros(bot:Client,cor:(g:string|null)=>number,store=cri
    if(!i.inGuild()||!i.guild||!i.isRepliable())throw Error('Use este recurso em um servidor.');const g=i.guild,[,acao,id,valor]=custom.split(':');
    const config=entradaUI||['config','configmenu','groups','xp','xpnotice','xpchannels','xpcooldown','xpnoticeoff','inv','invlogs','invlogsoff','close'].includes(acao??'');
    if(config){
-    if(!i.memberPermissions?.has(P.Administrator))throw Error('Apenas administradores configuram os comandos de membros.');if(i.isMessageComponent())await i.deferUpdate();
-    if(entradaUI){await i.followUp({...painel(g.id),flags:MessageFlags.Ephemeral});return true;}
+    if(!podeConfigurar(i))throw Error('Apenas administradores configuram os comandos de membros.');if(i.isMessageComponent())await i.deferUpdate();
+    if(entradaUI){await responder(i,painel(g.id));return true;}
     if(acao==='config'){await responder(i,painel(g.id));return true;}
     if(acao==='close'){await responder(i,{content:e('fechar')+' Configurações fechadas.',embeds:[],components:[]});return true;}
     if(i.isStringSelectMenu()&&acao==='configmenu'){
@@ -199,7 +202,7 @@ export function instalarMembros(bot:Client,cor:(g:string|null)=>number,store=cri
    throw Error('Comando indisponível.');
   }catch(err){if(i.isRepliable())await responder(i,{content:e('erro')+' '+safe(err instanceof Error?err.message:'Não foi possível concluir.'),embeds:[],components:[],allowedMentions:{parse:[]}},true);return true;}
  }
- const limpeza=setInterval(()=>{const tempo=agora();for(const [id,j]of jogos)if(j.expira<tempo)jogos.delete(id);for(const [id,t]of cooldowns)if(t<tempo)cooldowns.delete(id);},60000);limpeza.unref();
+ const limpeza=intervaloBot(()=>{const tempo=agora();for(const [id,j]of jogos)if(j.expira<tempo)jogos.delete(id);for(const [id,t]of cooldowns)if(t<tempo)cooldowns.delete(id);},60000);limpeza.unref();
  return{tratar,mensagemXP,entrada,processarEntradas,capturar,store,parar:()=>{clearInterval(limpeza);for(const t of timers.values())clearTimeout(t);}};
 }
 
