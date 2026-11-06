@@ -1,7 +1,7 @@
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {ActionRowBuilder,ButtonBuilder,ButtonStyle,ContainerBuilder,MessageFlags,PermissionFlagsBits as P,RoleSelectMenuBuilder,TextDisplayBuilder,UserSelectMenuBuilder,type Interaction,type GuildMember} from 'discord.js';
+import {ActionRowBuilder,ButtonBuilder,ButtonStyle,ContainerBuilder,MessageFlags,RoleSelectMenuBuilder,TextDisplayBuilder,UserSelectMenuBuilder,type Interaction,type GuildMember} from 'discord.js';
 import {arquivoDados,contextoAtual} from './contexto-bot.js';
 
 type Permissoes={vinculo:string;revisao:string;usuarios:string[];cargos:string[];completos?:string[]};
@@ -40,7 +40,7 @@ export function delegado(i:Alvo):boolean{
  if(!g||!u||!ctx||i.user?.bot||!ctx.permitirGuild(g))return false;
  const d=criarStoreAcessos().obter(g),m=i.member as {roles?:string[]|{cache?:{has:(id:string)=>boolean}}}|undefined;
  const roles=m?.roles;
- return d.usuarios.includes(u)||d.cargos.some(r=>Array.isArray(roles)?roles.includes(r):roles?.cache?.has(r)===true);
+ return d.usuarios.includes(u)||d.cargos.some(r=>r!==g&&(Array.isArray(roles)?roles.includes(r):roles?.cache?.has(r)===true));
 }
 export function acessoCompleto(i:Alvo):boolean{
  const g=i.guildId??i.guild?.id,u=i.user?.id,ctx=contextoAtual();
@@ -50,7 +50,7 @@ export function acessoCompleto(i:Alvo):boolean{
 export function podeConfigurar(i:Alvo):boolean{
  const g=i.guildId??i.guild?.id,ctx=contextoAtual();
  if(!g||i.user?.bot||ctx&&!ctx.permitirGuild(g))return false;
- return (i.memberPermissions?.has(P.Administrator)??false)||podeGerenciarAcessos(i)||delegado(i)||acessoCompleto(i);
+ return podeGerenciarAcessos(i)||delegado(i)||acessoCompleto(i);
 }
 export function membroPodeConfigurar(m:GuildMember):boolean{return podeConfigurar({guild:m.guild,user:m.user,member:m,memberPermissions:m.permissions});}
 
@@ -95,3 +95,4 @@ export function instalarAcessos(cor:(id:string|null)=>number){
  }
  return{tratar,painel,store};
 }
+
