@@ -293,7 +293,7 @@ bot.on(Events.InteractionCreate, rastrearBot(async interaction => {
     if(['configbot','ping'].includes(diagnosticoAcao)||diagnosticoAcao==='anzy:categoria')console.log('Entrada de interação',JSON.stringify({bot:clientId,acao:diagnosticoAcao,atrasoMs:Date.now()-interaction.createdTimestamp}));
     if(interaction.isChatInputCommand()&&interaction.commandName==='ping'){await interaction.reply({content:emojiTexto('sucesso')+' Pong! Sistema funcionando.'});console.log('Ping respondido',clientId);return;}
     if(interaction.isChatInputCommand()&&interaction.commandName==='configbot'){
-      if(!podeConfigurar(interaction)){await interaction.reply({content:emojiTexto('erro')+' Acesso permitido ao comprador, administradores e equipe autorizada.',flags:MessageFlags.Ephemeral});return;}
+      if(!podeConfigurar(interaction)){await interaction.reply({content:emojiTexto('erro')+' Acesso permitido somente ao responsável e às pessoas autorizadas.',flags:MessageFlags.Ephemeral});return;}
       const inicio=Date.now();await interaction.deferReply({flags:MessageFlags.Ephemeral});console.log('Painel confirmado',JSON.stringify({bot:clientId,ms:Date.now()-inicio}));
       await interaction.editReply({...painelPrincipal(interaction.guildId),flags:MessageFlags.IsComponentsV2});console.log('Painel aberto',JSON.stringify({bot:clientId,ms:Date.now()-inicio}));return;
     }
@@ -456,6 +456,7 @@ bot.on(Events.ShardResume, shardId => console.log(`Shard ${shardId} reconectado.
 try{await bot.login(token);}catch{comunidade.parar();await bot.destroy();seguranca.parar();membros.parar();limparContexto(ctx);throw Error('Não foi possível conectar este bot.');}
 return{bot,storeVendas,canalComunicados:(guild:string)=>outrosStore.obter(guild).avisos,concluirEntrega:tratarVendas.concluirEntrega,atualizarProduto:tratarVendas.atualizarProduto,parar:async()=>{ctx.parando=true;await Promise.allSettled([...ctx.pendentes]);await bot.destroy();seguranca.parar();membros.parar();limparContexto(ctx);bot.removeAllListeners();}};
 }
+
 
 
 
